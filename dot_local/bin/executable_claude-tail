@@ -1,0 +1,616 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""claude-tail — live filtered Claude/Codex JSONL viewer
+Usage: claude-tail [file.jsonl]         (no arg = watch ~/.claude/projects for newest)
+       claude-tail --codex [file.jsonl] (watch ~/.codex/sessions for newest)
+Keys:  c=Conversation  t=Tools  k=Tokens  f=Full  x=Tools-Full  r=Raw  /=Highlight  q/Esc=Quit
+"""
+
+import sys, json, os, tty, termios, select, time, subprocess, fcntl, struct
+
+# Open /dev/tty for size queries and raw input — survives stdout redirection
+_tty_fd = os.open('/dev/tty', os.O_RDWR | os.O_NOCTTY)
+
+# Force UTF-8 stdout
+sys.stdout = open(sys.stdout.fileno(), mode='w', encoding='utf-8', buffering=1, closefd=False)
+
+# Removed tmux status-line manipulation — just uses ANSI scroll region
+
+# ── Config / defaults ─────────────────────────────────────────────────────────
+CONFIG_PATH      = os.path.expanduser('~/.config/claude-tail/config.json')
+DEFAULT_WATCH    = os.path.expanduser('~/.claude/projects')
+DEFAULT_WATCH_CX = os.path.expanduser('~/.codex/sessions')
+
+# Set by parse_args; controls which renderer to use
+CODEX_MODE = False
+TICK_SLEEP     = 0.1    # seconds per loop tick
+WATCH_TICKS    = 20     # ticks between newest-file checks (20 * 0.1s = 2s)
+RENDER_SCREENS = 4      # screenfuls to show on re-render
+TOOL_INPUT_MAX = 120    # max chars for tool input preview
+RESULT_MAX     = 200    # max chars for tool result preview
+FULL_MODE_MSGS = 2      # how many messages to show in full/JSON mode
+
+# ── Toggles — keyed by function name, not hotkey ─────────────────────────────
+# To remap a key, change TOGGLE_KEYS only.
+TOGGLE_KEYS = {
+    'conversation': 'c',
+    'tools':        't',
+    'tokens':       'k',
+    'full':         'f',
+    'tools_full':   'x',
+    'raw':          'r',
+}
+TOGGLES = {
+    'conversation': ['Conversation', True ],
+    'tools':        ['Tools',        True ],
+    'tokens':       ['Tokens',       False],
+    'full':         ['Full',         False],
+    'tools_full':   ['Tools-Full',   False],
+    'raw':          ['Raw',          False],
+}
+KEY_TO_TOGGLE = {v: k for k, v in TOGGLE_KEYS.items()}
+
+# ── Config load / save ────────────────────────────────────────────────────────
+def load_config():
+    global TICK_SLEEP, WATCH_TICKS, RENDER_SCREENS, TOOL_INPUT_MAX, RESULT_MAX, FULL_MODE_MSGS
+    try:
+        with open(CONFIG_PATH) as f:
+            cfg = json.load(f)
+        for fname, val in cfg.get('toggles', {}).items():
+            if fname in TOGGLES:
+                TOGGLES[fname][1] = bool(val)
+        TICK_SLEEP     = cfg.get('tick_sleep',     TICK_SLEEP)
+        WATCH_TICKS    = cfg.get('watch_ticks',    WATCH_TICKS)
+        RENDER_SCREENS = cfg.get('render_screens', RENDER_SCREENS)
+        TOOL_INPUT_MAX = cfg.get('tool_input_max', TOOL_INPUT_MAX)
+        RESULT_MAX     = cfg.get('result_max',     RESULT_MAX)
+        FULL_MODE_MSGS = cfg.get('full_mode_msgs', FULL_MODE_MSGS)
+    except Exception:
+        pass
+
+def save_config():
+    try:
+        os.makedirs(os.path.dirname(CONFIG_PATH), exist_ok=True)
+        cfg = {
+            'toggles':       {k: v[1] for k, v in TOGGLES.items()},
+            'tick_sleep':     TICK_SLEEP,
+            'watch_ticks':    WATCH_TICKS,
+            'render_screens': RENDER_SCREENS,
+            'tool_input_max': TOOL_INPUT_MAX,
+            'result_max':     RESULT_MAX,
+            'full_mode_msgs': FULL_MODE_MSGS,
+        }
+        with open(CONFIG_PATH, 'w') as f:
+            json.dump(cfg, f, indent=2)
+    except Exception:
+        pass
+
+# ── State ─────────────────────────────────────────────────────────────────────
+buf            = []
+fp             = None
+current_file   = None
+highlight_words = []   # list of lowercase strings to highlight
+
+# ── ANSI colors ───────────────────────────────────────────────────────────────
+RST = '\033[0m'
+def bold(s):    return f'\033[1m{s}{RST}'
+def dim(s):     return f'\033[38;5;250m{s}{RST}'
+def green(s):   return f'\033[32m{s}{RST}'
+def yellow(s):  return f'\033[33m{s}{RST}'
+def blue(s):    return f'\033[34m{s}{RST}'
+def cyan(s):    return f'\033[36m{s}{RST}'
+def red(s):     return f'\033[31m{s}{RST}'
+def hl(s):      return f'\033[30;43m{s}{RST}'   # black-on-yellow highlight
+
+def apply_highlights(line):
+    """Case-insensitive highlight of words in a rendered (possibly ANSI) line."""
+    if not highlight_words:
+        return line
+    import re
+    # Work on the raw string; ANSI codes are preserved, we match visible chars
+    pattern = '|'.join(re.escape(w) for w in highlight_words)
+    return re.sub(pattern, lambda m: hl(m.group(0)), line, flags=re.IGNORECASE)
+
+def _tty_size():
+    try:
+        data = fcntl.ioctl(_tty_fd, termios.TIOCGWINSZ, b'\x00' * 8)
+        rows, cols = struct.unpack('hh', data[:4])
+        if rows > 0 and cols > 0:
+            return rows, cols
+    except Exception:
+        pass
+    for fd in (1, 2, 0):
+        try:
+            s = os.get_terminal_size(fd)
+            return s.rows, s.columns
+        except Exception:
+            pass
+    return 24, 80
+
+def term_rows(): return _tty_size()[0]
+def term_cols(): return _tty_size()[1]
+
+# ── JSON syntax highlighting ──────────────────────────────────────────────────
+def highlight_json(text):
+    out = []
+    i = 0
+    while i < len(text):
+        c = text[i]
+        if c == '"':
+            j = i + 1
+            while j < len(text):
+                if text[j] == '\\':  j += 2
+                elif text[j] == '"': j += 1; break
+                else:                j += 1
+            token = text[i:j]
+            if text[j:].lstrip().startswith(':'):
+                out.append(cyan(token))
+            else:
+                out.append(green(token))
+            i = j
+        elif c in '-0123456789':
+            j = i
+            while j < len(text) and text[j] in '-0123456789.eE+':
+                j += 1
+            out.append(yellow(text[i:j]))
+            i = j
+        elif text[i:i+4] == 'true':  out.append(green('true'));  i += 4
+        elif text[i:i+5] == 'false': out.append(red('false'));   i += 5
+        elif text[i:i+4] == 'null':  out.append(dim('null'));    i += 4
+        else:
+            out.append(c); i += 1
+    return ''.join(out)
+
+# ── Status bar ────────────────────────────────────────────────────────────────
+def _status_ansi():
+    parts = []
+    for fname, (label, on) in TOGGLES.items():
+        key = TOGGLE_KEYS[fname]
+        display = f'{key}:{label}'
+        parts.append(green(bold(f'[{display}]')) if on else dim(f' {display} '))
+    parts.append(dim('/:highlight'))
+    if highlight_words:
+        parts.append(hl(f" {','.join(highlight_words)} "))
+    parts.append(dim('q/esc:quit'))
+    parts.append(dim(f'  {current_file or "scanning ."}'))
+    return '  '.join(parts)
+
+def _strip_ansi(s):
+    """Return visible length of string by stripping ANSI escape codes."""
+    import re
+    return len(re.sub(r'\033\[[0-9;]*m', '', s))
+
+def draw_status():
+    r = term_rows()
+    c = term_cols()
+    bar = _status_ansi()
+    # Truncate if visible length exceeds terminal width to prevent wrapping
+    visible_len = _strip_ansi(bar)
+    if visible_len > c:
+        # Rebuild without the filename if it doesn't fit
+        parts = []
+        for fname, (label, on) in TOGGLES.items():
+            key = TOGGLE_KEYS[fname]
+            display = f'{key}:{label}'
+            parts.append(green(bold(f'[{display}]')) if on else dim(f' {display} '))
+        parts.append(dim('q/esc:quit'))
+        bar = '  '.join(parts)
+    print(f'\033[s\033[{r};1H\033[2K{bar}\033[u', end='', flush=True)
+
+def setup_display():
+    r = term_rows()
+    # Reserve bottom line for status bar via scroll region
+    print(f'\033[1;{r - 1}r', end='', flush=True)
+    draw_status()
+
+def teardown_display():
+    try:
+        # Reset scroll region and clear screen
+        print('\033[r\033[2J\033[H', end='', flush=True)
+    except Exception:
+        pass
+
+# ── Render one message ────────────────────────────────────────────────────────
+def render_obj(obj):
+    typ = obj.get('type', '')
+    if typ in ('queue-operation', 'progress'):
+        return
+
+    if TOGGLES['raw'][1]:
+        yield dim(json.dumps(obj))
+        return
+
+    if TOGGLES['full'][1]:
+        yield highlight_json(json.dumps(obj, indent=2))
+        yield ''
+        return
+
+    role    = obj.get('message', {}).get('role')    or obj.get('role')    or ''
+    usage   = obj.get('message', {}).get('usage')   or obj.get('usage')
+    content = obj.get('message', {}).get('content') or obj.get('content') or []
+
+    show_c  = TOGGLES['conversation'][1]
+    show_t  = TOGGLES['tools'][1]
+    show_k  = TOGGLES['tokens'][1]
+    show_tf = TOGGLES['tools_full'][1]
+    had     = False
+
+    for item in content:
+        if not isinstance(item, dict):
+            continue
+        itype = item.get('type', '')
+
+        if itype == 'text' and show_c:
+            text = item.get('text', '').strip()
+            if text:
+                label = cyan(f'[{role}]') if role == 'assistant' else yellow(f'[{role}]')
+                yield f'{label} {yellow(text)}'
+                had = True
+
+        elif itype == 'tool_use' and show_t:
+            name = item.get('name', '?')
+            _TOOL_DANGER  = {'bash', 'write', 'edit', 'multiedit', 'notebookedit'}
+            _TOOL_SAFE    = {'read', 'glob', 'grep', 'ls', 'notebookread'}
+            _name_lc = name.lower()
+            if _name_lc in _TOOL_DANGER:
+                tool_color = lambda s: f'\033[31m{s}{RST}'   # red
+            elif _name_lc in _TOOL_SAFE:
+                tool_color = green
+            else:
+                tool_color = blue
+            if show_tf:
+                inp_lines = json.dumps(item.get('input', {}), indent=2).split('\n')
+                yield f"{tool_color('[tool]')} {bold(name)}"
+                for l in inp_lines:
+                    yield f"  {dim(l)}"
+            else:
+                inp = json.dumps(item.get('input', {}))
+                if len(inp) > TOOL_INPUT_MAX: inp = inp[:TOOL_INPUT_MAX - 3] + '...'
+                yield f"{tool_color('[tool]')} {bold(name)}  {dim(inp)}"
+            had = True
+
+        elif itype == 'tool_result' and show_t:
+            val = item.get('content', '')
+            if isinstance(val, list):
+                val = ' '.join(c.get('text', '') for c in val if isinstance(c, dict))
+            val = str(val).strip()
+            err = red(' [err]') if item.get('is_error') else ''
+            if show_tf:
+                # Full output, newlines become real newlines
+                lines = val.split('\n')
+                yield f"{blue('[result]')}{err}  {dim(lines[0])}"
+                for l in lines[1:]:
+                    yield f"  {dim(l)}"
+            else:
+                if len(val) > RESULT_MAX: val = val[:RESULT_MAX - 3] + '...'
+                yield f"{blue('[result]')}{err}  {dim(val)}"
+            had = True
+
+    if show_k and usage:
+        tk = {
+            'in':        usage.get('input_tokens',                0),
+            'cache_new': usage.get('cache_creation_input_tokens', 0),
+            'cache_hit': usage.get('cache_read_input_tokens',     0),
+            'out':       usage.get('output_tokens',               0),
+        }
+        yield dim(f'  -> {tk}')
+        had = True
+
+    if had:
+        yield ''
+
+# ── Codex renderer ────────────────────────────────────────────────────────────
+def render_codex_obj(obj):
+    typ = obj.get('type', '')
+
+    if TOGGLES['raw'][1]:
+        yield dim(json.dumps(obj))
+        return
+
+    if TOGGLES['full'][1]:
+        yield highlight_json(json.dumps(obj, indent=2))
+        yield ''
+        return
+
+    if typ != 'response_item':
+        return
+
+    p    = obj.get('payload', {})
+    pt   = p.get('type', '')
+    role = p.get('role', '')
+
+    show_c  = TOGGLES['conversation'][1]
+    show_t  = TOGGLES['tools'][1]
+    show_tf = TOGGLES['tools_full'][1]
+    had     = False
+
+    if pt == 'message' and show_c:
+        content = p.get('content', [])
+        for item in content:
+            if not isinstance(item, dict):
+                continue
+            itype = item.get('type', '')
+            text  = ''
+            if itype in ('input_text', 'output_text'):
+                text = item.get('text', '').strip()
+            if text:
+                if role == 'assistant':
+                    label = cyan(f'[assistant]')
+                    yield f'{label} {yellow(text)}'
+                elif role == 'user':
+                    label = yellow(f'[user]')
+                    yield f'{label} {text}'
+                # skip developer/system roles unless full mode
+                had = True
+
+    elif pt == 'function_call' and show_t:
+        name = p.get('name', '?')
+        _TOOL_DANGER = {'exec_command', 'write_file', 'patch_file', 'delete_file'}
+        _TOOL_SAFE   = {'read_file', 'list_dir', 'search_files', 'grep'}
+        _name_lc = name.lower()
+        if _name_lc in _TOOL_DANGER:
+            tool_color = lambda s: f'\033[31m{s}{RST}'
+        elif _name_lc in _TOOL_SAFE:
+            tool_color = green
+        else:
+            tool_color = blue
+        if show_tf:
+            try:
+                args_obj  = json.loads(p.get('arguments', '{}'))
+                inp_lines = json.dumps(args_obj, indent=2).split('\n')
+            except Exception:
+                inp_lines = [p.get('arguments', '')]
+            yield f"{tool_color('[tool]')} {bold(name)}"
+            for l in inp_lines:
+                yield f"  {dim(l)}"
+        else:
+            args = p.get('arguments', '{}')
+            if len(args) > TOOL_INPUT_MAX:
+                args = args[:TOOL_INPUT_MAX - 3] + '...'
+            yield f"{tool_color('[tool]')} {bold(name)}  {dim(args)}"
+        had = True
+
+    elif pt == 'function_call_output' and show_t:
+        raw = p.get('output', '')
+        # Strip the Codex chunk header lines (Chunk ID, Wall time, etc.)
+        lines = raw.split('\n')
+        content_lines = []
+        skip_header = True
+        for l in lines:
+            if skip_header and (
+                l.startswith('Chunk ID:') or l.startswith('Wall time:') or
+                l.startswith('Process exited') or l.startswith('Original token') or
+                l == 'Output:'
+            ):
+                continue
+            skip_header = False
+            content_lines.append(l)
+        val = '\n'.join(content_lines).strip()
+        if show_tf:
+            out_lines = val.split('\n')
+            yield f"{blue('[result]')}  {dim(out_lines[0])}"
+            for l in out_lines[1:]:
+                yield f"  {dim(l)}"
+        else:
+            if len(val) > RESULT_MAX:
+                val = val[:RESULT_MAX - 3] + '...'
+            yield f"{blue('[result]')}  {dim(val)}"
+        had = True
+
+    if had:
+        yield ''
+
+
+# ── Full re-render ────────────────────────────────────────────────────────────
+def render_all():
+    print('\033[2J\033[H', end='')
+    # In full/JSON/raw mode only show last N messages to avoid chaos
+    source = buf[-FULL_MODE_MSGS:] if (TOGGLES['full'][1] or TOGGLES['raw'][1]) else buf
+    renderer = render_codex_obj if CODEX_MODE else render_obj
+    all_lines = []
+    for obj in source:
+        all_lines.extend(renderer(obj))
+    limit = (term_rows() * RENDER_SCREENS) - 2
+    visible = all_lines[-limit:]
+    for line in visible:
+        print(apply_highlights(line))
+    draw_status()
+    sys.stdout.flush()
+
+# ── File helpers ──────────────────────────────────────────────────────────────
+def open_file(path):
+    global fp, current_file
+    if fp: fp.close()
+    fp           = open(path, 'r', encoding='utf-8')
+    current_file = path
+
+def slurp_existing():
+    fp.seek(0)
+    for line in fp:
+        line = line.strip()
+        if line:
+            try: buf.append(json.loads(line))
+            except: pass
+
+def read_new_lines():
+    if not fp: return []
+    result = []
+    while True:
+        line = fp.readline()
+        if not line: break
+        line = line.strip()
+        if line:
+            try: result.append(json.loads(line))
+            except: pass
+    return result
+
+def find_by_name(name, search_path):
+    try:
+        out = subprocess.check_output(
+            ['find', search_path, '-name', name, '-type', 'f'],
+            stderr=subprocess.DEVNULL, text=True
+        )
+        files = [l for l in out.strip().split('\n') if l]
+        return files[0] if files else None
+    except:
+        return None
+
+def find_newest_jsonl(search_path):
+    try:
+        out = subprocess.check_output(
+            ['find', search_path, '-name', '*.jsonl', '-type', 'f',
+             '-exec', 'stat', '-f', '%m %N', '{}', ';'],
+            stderr=subprocess.DEVNULL, text=True
+        )
+        lines = [l for l in out.strip().split('\n') if l]
+        if not lines: return None
+        return sorted(lines, reverse=True)[0].split(' ', 1)[1]
+    except:
+        return None
+
+# ── Inline line input (for highlight prompt) ──────────────────────────────────
+def read_line_from_tty(fd, prompt):
+    """Temporarily restore canonical input to read a line from the tty."""
+    r = term_rows()
+    # Show prompt on status bar line
+    print(f'\033[s\033[{r};1H\033[2K{bold(prompt)}', end='', flush=True)
+    # Switch tty back to canonical mode for line input
+    old = termios.tcgetattr(fd)
+    cooked = termios.tcgetattr(fd)
+    cooked[3] |= termios.ECHO | termios.ICANON
+    termios.tcsetattr(fd, termios.TCSANOW, cooked)
+    try:
+        line = ''
+        while True:
+            ch = os.read(fd, 1).decode('utf-8', errors='ignore')
+            if ch in ('\n', '\r'):
+                break
+            if ch in ('\x7f', '\x08'):  # backspace
+                if line:
+                    line = line[:-1]
+                    print('\033[D \033[D', end='', flush=True)
+            elif ch == '\x1b':          # ESC cancels
+                line = ''
+                break
+            else:
+                line += ch
+                print(ch, end='', flush=True)
+    finally:
+        termios.tcsetattr(fd, termios.TCSANOW, old)
+    print('\033[u', end='', flush=True)
+    return line
+
+# ── Main ──────────────────────────────────────────────────────────────────────
+def parse_args():
+    """Returns (file_arg, watch_path)."""
+    global CODEX_MODE
+    args = sys.argv[1:]
+    watch_path = DEFAULT_WATCH
+    file_arg   = None
+    i = 0
+    while i < len(args):
+        if args[i] == '--codex':
+            CODEX_MODE = True
+            watch_path = DEFAULT_WATCH_CX
+            i += 1
+        elif args[i] in ('--path', '-p') and i + 1 < len(args):
+            watch_path = os.path.expanduser(args[i + 1])
+            i += 2
+        else:
+            file_arg = args[i]
+            i += 1
+    return file_arg, watch_path
+
+def main():
+    load_config()
+
+    file_arg, watch_path = parse_args()
+
+    fd           = _tty_fd
+    old_settings = termios.tcgetattr(fd)
+    tty.setcbreak(fd)
+
+    def restore():
+        teardown_display()
+        termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+        print()
+
+    try:
+        watch_mode = file_arg is None
+
+        if not watch_mode:
+            path = file_arg
+            if not os.path.exists(path):
+                found = find_by_name(os.path.basename(path), watch_path)
+                if found:
+                    path = found
+                else:
+                    print(f'File not found: {path}', file=sys.stderr)
+                    sys.exit(1)
+            open_file(path)
+            slurp_existing()
+        else:
+            newest = find_newest_jsonl(watch_path)
+            if newest:
+                open_file(newest)
+                slurp_existing()
+
+        setup_display()
+        render_all()
+
+        tick = 0
+        while True:
+            # ── Keypress ──
+            if select.select([fd], [], [], 0)[0]:
+                key = os.read(fd, 1).decode('utf-8', errors='ignore')
+                if key in ('q', '\x03', '\x04'):
+                    break
+                if key == '\x1b':
+                    # Drain any escape sequence (arrow keys etc); bare ESC = quit
+                    time.sleep(0.05)
+                    if select.select([fd], [], [], 0)[0]:
+                        # Read remaining bytes of escape sequence non-blockingly
+                        while select.select([fd], [], [], 0)[0]:
+                            os.read(fd, 1)
+                    else:
+                        break
+                if key == '/':
+                    raw = read_line_from_tty(fd, '/ highlight (comma-separated, empty=clear): ')
+                    highlight_words[:] = [w.strip() for w in raw.split(',') if w.strip()]
+                    render_all()
+                elif key in KEY_TO_TOGGLE:
+                    TOGGLES[KEY_TO_TOGGLE[key]][1] = not TOGGLES[KEY_TO_TOGGLE[key]][1]
+                    save_config()
+                    render_all()
+
+            # ── Watch for newer file ──
+            if watch_mode and tick % WATCH_TICKS == 0:
+                newest = find_newest_jsonl(watch_path)
+                if newest and newest != current_file:
+                    open_file(newest)
+                    buf.clear()
+                    slurp_existing()
+                    render_all()
+
+            # ── Stream new lines ──
+            renderer = render_codex_obj if CODEX_MODE else render_obj
+            for obj in read_new_lines():
+                buf.append(obj)
+                lines = list(renderer(obj))
+                if lines:
+                    for line in lines:
+                        print(apply_highlights(line))
+                    draw_status()
+                    sys.stdout.flush()
+
+            tick += 1
+            time.sleep(TICK_SLEEP)
+
+    finally:
+        restore()
+
+if __name__ == '__main__':
+    try:
+        main()
+    except KeyboardInterrupt:
+        pass

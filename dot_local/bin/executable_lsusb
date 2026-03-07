@@ -1,0 +1,368 @@
+#!/bin/bash
+
+# lsusb - List USB devices on macOS and Linux
+#
+# A cross-platform USB device lister that displays USB devices in a formatted
+# table with device names, product IDs, vendor IDs, vendor names, and
+# connection speeds. On macOS, uses system_profiler to gather USB device
+# information. On Linux, uses lsusb with tree and verbose output.
+# Formats output in a clean, hierarchical table with color-coded speeds.
+#
+# Features:
+# - Color-coded speed indicators (Green: USB 3.x, Yellow: USB 2.0, Red: USB 1.x)
+# - Hierarchical device tree display with indentation
+# - Apple/Linux Foundation devices hidden by default (use -A to show them)
+# - Handles missing device information gracefully
+# - Clean table formatting with proper alignment
+# - Cross-platform support (macOS and Linux)
+#
+# Usage: lsusb.sh [-A]
+#   -A: Show Apple Inc. devices (macOS) or Linux Foundation devices (Linux)
+
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+#
+# Copyright (c) 2025 Rob Vella <me@robvella.com>
+
+# Parse command line arguments
+SHOW_APPLE=false
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        -A)
+            SHOW_APPLE=true
+            shift
+            ;;
+        *)
+            echo "Usage: $0 [-A]"
+            echo "  -A: Show Apple Inc. devices"
+            exit 1
+            ;;
+    esac
+done
+
+# ANSI colors
+RED="\033[0;31m"
+GREEN="\033[0;32m"
+YELLOW="\033[0;33m"
+BLUE="\033[0;34m"
+NC="\033[0m" # No Color
+
+# Detect operating system
+OS_TYPE=$(uname -s)
+
+# Function to get speed color
+get_speed_color() {
+    local speed="$1"
+    local speed_color="$NC"
+    if [[ "$speed" == *"10000"* || "$speed" == *"10 Gb"* || "$speed" == *"10Gbps"* ]]; then
+        speed_color="$GREEN"
+    elif [[ "$speed" == *"5000"* || "$speed" == *"5 Gb"* || "$speed" == *"5Gbps"* ]]; then
+        speed_color="$GREEN"
+    elif [[ "$speed" == *"480"* || "$speed" == *"High Speed"* ]]; then
+        speed_color="$YELLOW"
+    elif [[ "$speed" == *"12M"* || "$speed" == *"12 Mb"* || "$speed" == *"Full Speed"* ]]; then
+        speed_color="$RED"
+    elif [[ "$speed" == *"1.5M"* || "$speed" == *"Low Speed"* ]]; then
+        speed_color="$RED"
+    fi
+    echo "$speed_color"
+}
+
+# Output table header
+printf "%s\n" "$(printf '%.0s-' {1..110})"
+printf "%-40s | %-10s | %-10s | %-15s | %-15s\n" "Device" "Prod ID" "Vend ID" "Vendor Name" "Speed"
+printf "%s\n" "$(printf '%.0s-' {1..110})"
+
+if [[ "$OS_TYPE" == "Darwin" ]]; then
+    # macOS implementation using system_profiler
+    # Don't strip leading whitespace - we need it for indentation
+    # Try SPUSBHostDataType first (macOS Tahoe+), fall back to SPUSBDataType (older versions)
+    USB_DATA=$(system_profiler SPUSBHostDataType 2>/dev/null)
+    if [[ -z "$USB_DATA" ]]; then
+        USB_DATA=$(system_profiler SPUSBDataType 2>/dev/null)
+    fi
+
+# Arrays to store device info for two-pass processing
+declare -a device_names
+declare -a device_indents
+declare -a device_prod_ids
+declare -a device_vend_ids
+declare -a device_vend_names
+declare -a device_speeds
+device_count=0
+
+# First pass: collect all visible devices
+current_device=""
+current_indent=0
+prod_id=""
+vend_id=""
+vend_name=""
+speed=""
+
+collect_device() {
+    if [[ -n "$current_device" && ( -n "$prod_id" || -n "$vend_id" || -n "$speed" ) ]]; then
+        # Skip Apple devices unless -A flag is set
+        if [[ "$vend_name" == "Apple Inc." || "$vend_name" == "Apple" ]]; then
+            if [[ "$SHOW_APPLE" == false ]]; then
+                return
+            fi
+        fi
+        
+        # Store device info
+        device_names[$device_count]="$current_device"
+        device_indents[$device_count]="$current_indent"
+        device_prod_ids[$device_count]="$prod_id"
+        device_vend_ids[$device_count]="$vend_id"
+        device_vend_names[$device_count]="$vend_name"
+        device_speeds[$device_count]="${speed:-N/A}"
+        ((device_count++))
+    fi
+}
+
+while IFS= read -r line; do
+    # Extract indentation by counting leading spaces
+    leading_spaces=$(echo "$line" | sed -n 's/^\( *\).*/\1/p' | wc -c)
+    indent=$((leading_spaces / 2)) # Every 2 spaces = 1 indent level
+    
+    # Strip leading whitespace for easier matching
+    stripped_line=$(echo "$line" | sed 's/^[[:space:]]*//')
+
+    # Device names are lines ending with just ":" (no value after)
+    # Field lines are like "Product ID: 0x1234" (have value after colon)
+    if [[ "$stripped_line" =~ ^[A-Za-z0-9].*:$ && ! "$stripped_line" =~ :.*: ]]; then
+        collect_device
+        # Trim colon and reset device data
+        device_name=$(echo "$stripped_line" | sed 's/:$//')
+        current_indent=$indent
+        current_device="$device_name"
+        prod_id=""
+        vend_id=""
+        vend_name=""
+        speed=""
+    fi
+
+    # Capture fields (match against stripped line)
+    # Support both old format (SPUSBDataType) and new format (SPUSBHostDataType in macOS Tahoe+)
+    if [[ "$stripped_line" == "Product ID:"* || "$stripped_line" == "USB Product ID:"* ]]; then
+        prod_id=$(echo "$stripped_line" | awk '{print $NF}')
+    elif [[ "$stripped_line" == "Vendor ID:"* || "$stripped_line" == "USB Vendor ID:"* ]]; then
+        vend_id=$(echo "$stripped_line" | awk '{print $NF}')
+        # Old format has vendor name in parentheses: "Vendor ID: 0x05ac (Apple Inc.)"
+        # Only set vend_name if we find parentheses (don't overwrite Manufacturer)
+        extracted_vend=$(echo "$stripped_line" | sed -n 's/.*(\(.*\))$/\1/p')
+        [[ -n "$extracted_vend" ]] && vend_name="$extracted_vend"
+    elif [[ "$stripped_line" == "Speed:"* || "$stripped_line" == "Link Speed:"* ]]; then
+        speed=$(echo "$stripped_line" | cut -d: -f2- | xargs)
+    elif [[ "$stripped_line" == "Manufacturer:"* ]]; then
+        # New format has separate Manufacturer field (comes before USB Vendor ID)
+        vend_name=$(echo "$stripped_line" | cut -d: -f2- | xargs)
+    fi
+
+done <<< "$USB_DATA"
+
+# Collect last device
+collect_device
+
+# Find minimum indent level among visible devices
+min_indent=999
+for ((i=0; i<device_count; i++)); do
+    if [[ ${device_indents[$i]} -lt $min_indent ]]; then
+        min_indent=${device_indents[$i]}
+    fi
+done
+[[ $min_indent -eq 999 ]] && min_indent=0
+
+# Second pass: print devices with adjusted indentation
+for ((i=0; i<device_count; i++)); do
+    current_device="${device_names[$i]}"
+    adjusted_indent=$((${device_indents[$i]} - min_indent))
+    prod_id="${device_prod_ids[$i]}"
+    vend_id="${device_vend_ids[$i]}"
+    vend_name="${device_vend_names[$i]}"
+    speed="${device_speeds[$i]}"
+    
+    # Color by speed
+    speed_color=$(get_speed_color "$speed")
+
+    # Build indent string - start tree chars from left
+    if [[ $adjusted_indent -gt 0 ]]; then
+        if [[ $adjusted_indent -eq 1 ]]; then
+            indent_str="├─ "
+            indent_display_width=3
+        else
+            indent_str=$(printf ' %.0s' $(seq 1 $((adjusted_indent - 1))))
+            indent_str+="├─ "
+            indent_display_width=$(( adjusted_indent + 2 ))
+        fi
+    else
+        indent_str=""
+        indent_display_width=0
+    fi
+
+    # Truncate device name to fit column (40 chars including indent)
+    max_name_len=$((40 - indent_display_width))
+    display_device="$current_device"
+    if [[ ${#display_device} -gt $max_name_len ]]; then
+        display_device="${display_device:0:$((max_name_len-3))}..."
+    fi
+
+    # Truncate vendor name if too long (15 chars)
+    display_vend="$vend_name"
+    if [[ ${#display_vend} -gt 15 ]]; then
+        display_vend="${display_vend:0:12}..."
+    fi
+
+    # Build device column with manual padding for correct alignment
+    device_col="$indent_str$display_device"
+    device_display_len=$((indent_display_width + ${#display_device}))
+    padding=$((40 - device_display_len))
+    if [[ $padding -gt 0 ]]; then
+        device_col+=$(printf '%*s' $padding '')
+    fi
+
+    printf "%s | %-10s | %-10s | %-15s | ${speed_color}%-15s${NC}\n" \
+        "$device_col" "$prod_id" "$vend_id" "$display_vend" "$speed"
+done
+
+else
+    # Linux implementation using lsusb
+    
+    # Build associative array of device speeds from lsusb -t
+    declare -A device_speeds
+    declare -A device_indent
+    
+    current_bus=""
+    while IFS= read -r line; do
+        # Root hub lines: /:  Bus 001.Port 001: Dev 001, Class=root_hub, Driver=xhci_hcd/6p, 480M
+        if [[ "$line" =~ ^/:.*Bus\ ([0-9]+).*Dev\ ([0-9]+).*,\ ([0-9]+\.?[0-9]*[MG])$ ]]; then
+            current_bus="${BASH_REMATCH[1]}"
+            dev="${BASH_REMATCH[2]}"
+            speed="${BASH_REMATCH[3]}"
+            bus_padded=$(printf "%03d" "$((10#$current_bus))")
+            dev_padded=$(printf "%03d" "$((10#$dev))")
+            device_speeds["$bus_padded:$dev_padded"]="$speed"
+            device_indent["$bus_padded:$dev_padded"]=0
+        # Child device lines: |__ Port 005: Dev 002, If 0, Class=Hub, Driver=hub/4p, 480M
+        elif [[ "$line" =~ Dev\ ([0-9]+).*,\ ([0-9]+\.?[0-9]*[MG])$ && -n "$current_bus" ]]; then
+            dev="${BASH_REMATCH[1]}"
+            speed="${BASH_REMATCH[2]}"
+            bus_padded=$(printf "%03d" "$((10#$current_bus))")
+            dev_padded=$(printf "%03d" "$((10#$dev))")
+            device_speeds["$bus_padded:$dev_padded"]="$speed"
+            
+            # Calculate indent level based on leading spaces/pipes
+            indent_chars="${line%%[^[:space:]|_]*}"
+            indent_level=$(( (${#indent_chars} / 4) ))
+            device_indent["$bus_padded:$dev_padded"]="$indent_level"
+        fi
+    done < <(/usr/bin/lsusb -t 2>/dev/null)
+    
+    # Process main lsusb output
+    while IFS= read -r line; do
+        # Parse lines like: Bus 001 Device 002: ID 05e3:0610 Genesys Logic, Inc. Hub
+        if [[ "$line" =~ ^Bus\ ([0-9]+)\ Device\ ([0-9]+):\ ID\ ([0-9a-f]+):([0-9a-f]+)\ (.*)$ ]]; then
+            bus="${BASH_REMATCH[1]}"
+            dev="${BASH_REMATCH[2]}"
+            vend_id="0x${BASH_REMATCH[3]}"
+            prod_id="0x${BASH_REMATCH[4]}"
+            full_name="${BASH_REMATCH[5]}"
+            
+            # Extract vendor name (first part before the product name)
+            # Formats: "Vendor, Inc. Product", "Vendor Name Product", etc.
+            if [[ "$full_name" =~ ^(.+,\ (Inc|Ltd|Corp|Co|LLC)\.)\ (.+)$ ]]; then
+                # Handle "Vendor, Inc. Product Name"
+                vend_name="${BASH_REMATCH[1]}"
+                device_name="${BASH_REMATCH[3]}"
+            elif [[ "$full_name" =~ ^(.+\ (Inc|Ltd|Corp|Co|LLC)\.)\ (.+)$ ]]; then
+                # Handle "Vendor Name Inc. Product Name"
+                vend_name="${BASH_REMATCH[1]}"
+                device_name="${BASH_REMATCH[3]}"
+            elif [[ "$full_name" =~ ^([A-Za-z]+\ [A-Za-z]+)\ (.+)$ ]]; then
+                # Handle "Two Word Vendor Product Name"
+                vend_name="${BASH_REMATCH[1]}"
+                device_name="${BASH_REMATCH[2]}"
+            else
+                # Use full name as device, extract first two words as vendor
+                vend_name=$(echo "$full_name" | awk '{print $1, $2}')
+                device_name="$full_name"
+            fi
+            
+            # Skip Linux Foundation devices unless -A flag is set
+            if [[ "$vend_name" == *"Linux Foundation"* && "$SHOW_APPLE" == false ]]; then
+                continue
+            fi
+            
+            # Get speed from associative array
+            key="$bus:$dev"
+            speed="${device_speeds[$key]:-N/A}"
+            
+            # Format speed for display
+            if [[ "$speed" != "N/A" ]]; then
+                if [[ "$speed" == *"G"* ]]; then
+                    speed_display="${speed}bps"
+                else
+                    speed_display="${speed}bps"
+                fi
+            else
+                speed_display="N/A"
+            fi
+            
+            # Get indent level
+            indent_level="${device_indent[$key]:-0}"
+            
+            # Build indent string - start tree chars from left
+            # Level 0 = no indent, Level 1+ = tree chars with increasing indent
+            if [[ $indent_level -gt 0 ]]; then
+                if [[ $indent_level -eq 1 ]]; then
+                    indent_str="├─ "
+                    indent_display_width=3
+                else
+                    # Add 1 space per additional level
+                    indent_str=$(printf ' %.0s' $(seq 1 $((indent_level - 1))))
+                    indent_str+="├─ "
+                    indent_display_width=$(( indent_level + 2 ))
+                fi
+            else
+                indent_str=""
+                indent_display_width=0
+            fi
+            
+            # Truncate device name to fit column (40 chars including indent)
+            max_name_len=$((40 - indent_display_width))
+            display_device="$device_name"
+            if [[ ${#display_device} -gt $max_name_len ]]; then
+                display_device="${display_device:0:$((max_name_len-3))}..."
+            fi
+            
+            # Truncate vendor name if too long (15 chars)
+            display_vend="$vend_name"
+            if [[ ${#display_vend} -gt 15 ]]; then
+                display_vend="${display_vend:0:12}..."
+            fi
+            
+            # Color by speed
+            speed_color=$(get_speed_color "$speed")
+            
+            # Build device column with manual padding for correct alignment
+            device_col="$indent_str$display_device"
+            device_display_len=$((indent_display_width + ${#display_device}))
+            padding=$((40 - device_display_len))
+            if [[ $padding -gt 0 ]]; then
+                device_col+=$(printf '%*s' $padding '')
+            fi
+            
+            printf "%s | %-10s | %-10s | %-15s | ${speed_color}%-15s${NC}\n" \
+                "$device_col" "$prod_id" "$vend_id" "$display_vend" "$speed_display"
+        fi
+    done < <(/usr/bin/lsusb 2>/dev/null)
+fi
