@@ -1,0 +1,13 @@
+#!/bin/bash
+# Strip full-line comments (# or ;) and blank lines from config files.
+# Only removes lines where the FIRST non-whitespace char is # or ;
+# Usage: clean-comments <file>
+
+FILE=$1
+
+if [ -z "$FILE" ]; then
+  echo "Usage: clean-comments <file>" >&2
+  exit 1
+fi
+
+gsed -e '/^[[:space:]]*[#;]/d' -e '/^[[:space:]]*$/d' -i "$FILE"

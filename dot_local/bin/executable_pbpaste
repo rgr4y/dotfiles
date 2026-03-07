@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# pbpaste shim for Linux — clipboard read isn't possible over SSH/headless.
+# Try xclip/xsel if available, otherwise silently output nothing.
+
+if command -v xclip >/dev/null 2>&1; then
+  xclip -selection clipboard -o
+elif command -v xsel >/dev/null 2>&1; then
+  xsel --clipboard --output
+else
+  echo ""
+fi

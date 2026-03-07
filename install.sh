@@ -155,10 +155,45 @@ install_packages() {
   fi
 }
 
+install_nerd_font() {
+  local FONT_NAME="JetBrainsMono"
+  local FONT_URL="https://github.com/ryanoasis/nerd-fonts/releases/latest/download/JetBrainsMono.tar.xz"
+  local FONT_DIR
+
+  case "$OS" in
+    darwin) FONT_DIR="$HOME/Library/Fonts" ;;
+    linux)  FONT_DIR="$HOME/.local/share/fonts" ;;
+  esac
+
+  # Check if already installed
+  if ls "$FONT_DIR"/*JetBrains*Nerd* &>/dev/null; then
+    echo "✓ JetBrains Mono Nerd Font already installed"
+    return
+  fi
+
+  echo "Installing JetBrains Mono Nerd Font..."
+  mkdir -p "$FONT_DIR"
+  local tmp
+  tmp="$(mktemp -d)"
+  curl -sL "$FONT_URL" -o "$tmp/font.tar.xz"
+  tar -xf "$tmp/font.tar.xz" -C "$tmp"
+  # Only copy the regular/bold/italic .ttf files, skip Windows-compat ones
+  find "$tmp" -name "*.ttf" ! -name "*Windows*" -exec cp {} "$FONT_DIR/" \;
+  rm -rf "$tmp"
+
+  # Rebuild font cache on Linux
+  if [[ "$OS" == "linux" ]] && command -v fc-cache &>/dev/null; then
+    fc-cache -f "$FONT_DIR"
+  fi
+
+  echo "✓ JetBrains Mono Nerd Font installed to $FONT_DIR"
+}
+
 install_chezmoi
 install_zi
 install_vim_plug
 install_packages
+install_nerd_font
 echo
 
 # ──────────────────────────────────────────────
