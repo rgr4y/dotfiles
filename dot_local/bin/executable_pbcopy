@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+me="$(basename "$0")"
+
+usage() {
+  cat <<'EOF' >&2
+Usage:
+  osc52 "text"
+  echo -n "text" | osc52
+  pbcat /path/to/file
+EOF
+  exit 2
+}
+
+# base64 flags differ across platforms:
+# - GNU coreutils: base64 -w0
+# - macOS/BSD:    base64 (no -w), adds \n by default
+b64_encode() {
+  if base64 --help 2>/dev/null | grep -q -- ' -w'; then
+    base64 -w0
+  else
+    base64 | tr -d '\n'
+  fi
+}
+
+if [[ "$me" == "pbcat" ]]; then
+  [[ $# -eq 1 ]] || usage
+  f="$1"
+  [[ -r "$f" && -f "$f" ]] || { echo "pbcat: not a readable file: $f" >&2; exit 1; }
+  b64="$(b64_encode <"$f")"
+else
+  if [[ $# -gt 0 ]]; then
+    b64="$(printf '%s' "$1" | b64_encode)"
+  else
+    b64="$(b64_encode)"
+  fi
+fi
+
+printf '\033]52;c;%s\a' "$b64"

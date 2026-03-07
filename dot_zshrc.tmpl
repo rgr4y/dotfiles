@@ -1,0 +1,378 @@
+# ──────────────────────────────────────────────
+# 1. PATH
+# ──────────────────────────────────────────────
+export PATH="$HOME/bin:$HOME/.local/bin:/usr/local/bin:/usr/local/sbin:$PATH"
+
+# ──────────────────────────────────────────────
+# 2. History
+# ──────────────────────────────────────────────
+HISTFILE="$HOME/.zsh_history"
+HISTSIZE=1000000000
+SAVEHIST=1000000000
+setopt INC_APPEND_HISTORY
+setopt SHARE_HISTORY
+setopt HIST_IGNORE_DUPS
+setopt HIST_REDUCE_BLANKS
+setopt EXTENDED_HISTORY
+setopt HIST_VERIFY
+
+# ──────────────────────────────────────────────
+# 3. OS Detection
+# ──────────────────────────────────────────────
+{{- if eq .chezmoi.os "darwin" }}
+export DOTFILES_OS="darwin"
+{{- else }}
+export DOTFILES_OS="linux"
+{{- end }}
+
+is_macos() { [[ "$DOTFILES_OS" == "darwin" ]]; }
+is_linux() { [[ "$DOTFILES_OS" == "linux" ]]; }
+is_wsl()   { [[ "$(uname -r)" == *microsoft* ]]; }
+
+# ──────────────────────────────────────────────
+# 4. Core Settings
+# ──────────────────────────────────────────────
+export ZDOTDIR=$HOME
+export ZSH_COMPDUMP=$HOME/.zcompdump
+export ZSH_DISABLE_COMPFIX=true
+export FUNCNEST=256
+export LESS='-R -M -i'
+export EDITOR=vim
+export RCLONE_PROGRESS=true
+
+# Key bindings (vi mode)
+bindkey -v
+bindkey "^A" vi-beginning-of-line
+bindkey "^E" vi-end-of-line
+bindkey -M viins '^A' vi-beginning-of-line
+bindkey -M viins '^E' vi-end-of-line
+
+# ──────────────────────────────────────────────
+# 5. Zi Plugin Manager
+# ──────────────────────────────────────────────
+if [[ ! -f "$HOME/.zi/bin/zi.zsh" ]]; then
+  mkdir -p "$HOME/.zi/bin"
+  git clone --depth 1 https://github.com/z-shell/zi.git "$HOME/.zi/bin" 2>/dev/null
+fi
+
+[[ -f "$HOME/.zi/bin/zi.zsh" ]] && source "$HOME/.zi/bin/zi.zsh"
+
+# Agnoster theme via zi (no OMZ needed)
+zi snippet OMZL::git.zsh
+zi snippet OMZL::theme-and-appearance.zsh
+zi snippet OMZT::agnoster
+
+# Stub out OMZ prompt functions agnoster expects
+(( ${+functions[tf_prompt_info]} )) || tf_prompt_info() { : }
+
+# Core plugins (always)
+zi light zsh-users/zsh-autosuggestions
+zi light zsh-users/zsh-syntax-highlighting
+zi light agkozak/zsh-z
+
+{{ if eq .profile "full" -}}
+# Extra plugins (full profile)
+zi light alexrochas/zsh-extract
+zi light alexrochas/zsh-vim-crtl-z
+zi light alexrochas/zsh-git-semantic-commits
+zi light alexrochas/zsh-path-environment-explorer
+{{ end -}}
+
+{{ if .modules.vscode -}}
+# ──────────────────────────────────────────────
+# VSCode Terminal Detection
+# ──────────────────────────────────────────────
+if [[ "$TERM_PROGRAM" == "vscode" || "$TERMINAL_EMULATOR" == "JetBrains-JediTerm" ]]; then
+  {{ if .modules.nvm -}}
+  # Lazy-load nvm for vscode
+  export NVM_DIR="$HOME/.nvm"
+  [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+  {{ end -}}
+  {{ if .modules.bun -}}
+  export BUN_INSTALL="$HOME/.bun"
+  export PATH="$BUN_INSTALL/bin:$PATH"
+  {{ end -}}
+  [[ -d "$PYENV_ROOT/bin" ]] && export PATH="$PYENV_ROOT/bin:$PATH" && eval "$(pyenv init - zsh)"
+  return 0 2>/dev/null || exit 0
+fi
+{{ end -}}
+
+{{ if .modules.nvm -}}
+# ──────────────────────────────────────────────
+# NVM (lazy-loaded)
+# ──────────────────────────────────────────────
+export NVM_DIR="$HOME/.nvm"
+
+nvm() {
+  unfunction nvm npm npx node
+  [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+  nvm "$@"
+}
+npm() {
+  unfunction nvm npm npx node
+  [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+  npm "$@"
+}
+npx() {
+  unfunction nvm npm npx node
+  [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+  npx "$@"
+}
+node() {
+  unfunction nvm npm npx node
+  [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+  node "$@"
+}
+
+nvm_find_nvmrc() {
+  local dir="$(pwd)"
+  while [[ "$dir" != "/" ]]; do
+    [[ -f "$dir/.nvmrc" ]] && echo "$dir/.nvmrc" && return
+    dir="$(dirname "$dir")"
+  done
+}
+{{ end -}}
+
+{{ if .modules.pyenv -}}
+# ──────────────────────────────────────────────
+# Pyenv
+# ──────────────────────────────────────────────
+export PYENV_ROOT="$HOME/.pyenv"
+[[ -d "$PYENV_ROOT/bin" ]] && export PATH="$PYENV_ROOT/bin:$PATH"
+command -v pyenv &>/dev/null && eval "$(pyenv init - zsh)"
+{{ end -}}
+
+{{ if .modules.bun -}}
+# ──────────────────────────────────────────────
+# Bun
+# ──────────────────────────────────────────────
+export BUN_INSTALL="$HOME/.bun"
+export PATH="$BUN_INSTALL/bin:$PATH"
+[[ -s "$HOME/.bun/_bun" ]] && source "$HOME/.bun/_bun"
+{{ end -}}
+
+{{ if .modules.copilot -}}
+# ──────────────────────────────────────────────
+# GitHub Copilot CLI
+# ──────────────────────────────────────────────
+if command -v gh &>/dev/null; then
+  ghcs() {
+    FUNCNAME="$funcstack[1]"
+    TARGET="shell"
+    local GH_DEBUG="$GH_DEBUG"
+    local GH_HOST="$GH_HOST"
+
+    local OPT OPTARG OPTIND
+    while getopts "dht:-:" OPT; do
+      if [ "$OPT" = "-" ]; then
+        OPT="${OPTARG%%=*}"
+        OPTARG="${OPTARG#"$OPT"}"
+        OPTARG="${OPTARG#=}"
+      fi
+      case "$OPT" in
+        debug|d) GH_DEBUG=api ;;
+        help|h)  echo "Usage: $FUNCNAME [-t shell|gh|git] <prompt>"; return 0 ;;
+        hostname) GH_HOST="$OPTARG" ;;
+        target|t) TARGET="$OPTARG" ;;
+      esac
+    done
+    shift "$((OPTIND-1))"
+
+    TMPFILE="$(mktemp -t gh-copilotXXXXXX)"
+    trap 'rm -f "$TMPFILE"' EXIT
+    if GH_DEBUG="$GH_DEBUG" GH_HOST="$GH_HOST" gh copilot suggest -t "$TARGET" "$@" --shell-out "$TMPFILE"; then
+      if [ -s "$TMPFILE" ]; then
+        FIXED_CMD="$(cat "$TMPFILE")"
+        print -s -- "$FIXED_CMD"
+        echo
+        eval -- "$FIXED_CMD"
+      fi
+    else
+      return 1
+    fi
+  }
+
+  ghce() {
+    FUNCNAME="$funcstack[1]"
+    local GH_DEBUG="$GH_DEBUG"
+    local GH_HOST="$GH_HOST"
+
+    local OPT OPTARG OPTIND
+    while getopts "dh-:" OPT; do
+      if [ "$OPT" = "-" ]; then
+        OPT="${OPTARG%%=*}"
+        OPTARG="${OPTARG#"$OPT"}"
+        OPTARG="${OPTARG#=}"
+      fi
+      case "$OPT" in
+        debug|d) GH_DEBUG=api ;;
+        help|h)  echo "Usage: $FUNCNAME <command>"; return 0 ;;
+        hostname) GH_HOST="$OPTARG" ;;
+      esac
+    done
+    shift "$((OPTIND-1))"
+
+    GH_DEBUG="$GH_DEBUG" GH_HOST="$GH_HOST" gh copilot explain "$@"
+  }
+fi
+{{ end -}}
+
+{{ if .modules.fzf -}}
+# ──────────────────────────────────────────────
+# FZF
+# ──────────────────────────────────────────────
+if is_macos && [[ -f /usr/local/opt/fzf/shell/key-bindings.zsh ]]; then
+  source /usr/local/opt/fzf/shell/key-bindings.zsh
+elif [[ -f ~/.fzf/shell/key-bindings.zsh ]]; then
+  source ~/.fzf/shell/key-bindings.zsh
+elif [[ -f /usr/share/fzf/key-bindings.zsh ]]; then
+  source /usr/share/fzf/key-bindings.zsh
+elif [[ -f /usr/share/doc/fzf/examples/key-bindings.zsh ]]; then
+  source /usr/share/doc/fzf/examples/key-bindings.zsh
+fi
+{{ end -}}
+
+# ──────────────────────────────────────────────
+# Prompt
+# ──────────────────────────────────────────────
+{{- if eq .chezmoi.os "darwin" }}
+# Custom prompt (mimi local only)
+# Cache hostname once
+: ${__ZP_HOST:=$(hostname -s)}
+
+# Colors
+local _n='%f' _dim='%F{245}'
+local _c_user='%F{green}' _c_host='%F{cyan}' _c_cwd='%F{33}'
+local _c_cwd_root='%F{red}' _c_git='%F{203}' _c_err='%F{196}' _c_time='%F{244}' _c_tag='%F{141}'
+
+setopt prompt_subst
+autoload -U add-zsh-hook
+zmodload zsh/datetime
+zmodload -F zsh/stat b:zstat
+
+# Command duration
+typeset -gF __ZP_TSTART=0.0
+preexec() { __ZP_TSTART=$EPOCHREALTIME }
+fmt_dur() {
+  (( __ZP_TSTART )) || return
+  local elapsed=$(( EPOCHREALTIME - __ZP_TSTART ))
+  local ms=$(( elapsed * 1000.0 ))
+  local ms_int=${ms%.*}
+  (( ms_int < 2000 )) && return
+  if (( ms_int < 60000 )); then
+    print -r -- "${_c_time}${ms_int}ms${_n}"
+  else
+    local s=$(( ms_int / 1000 ))
+    print -r -- "${_c_time}$(( s / 60 ))m$(( s % 60 ))s${_n}"
+  fi
+}
+
+# Git (fast, cached)
+typeset -gA __ZP_GIT_CACHE_MTIME __ZP_GIT_CACHE_STR
+
+__zp_find_git_dir() {
+  local dir=$PWD
+  while [[ $dir != / ]]; do
+    if [[ -d $dir/.git ]]; then
+      print -r -- "$dir/.git"; return 0
+    elif [[ -f $dir/.git ]]; then
+      local gd; gd=$(<"$dir/.git"); gd=${gd#gitdir: }; gd=${gd## }; gd=${gd%% }
+      [[ -z $gd ]] && return 1
+      [[ $gd = /* ]] || gd="$dir/$gd"
+      print -r -- "$gd"; return 0
+    fi
+    dir=${dir:h}
+  done
+  return 1
+}
+
+git_segment() {
+  local gdir; gdir=$(__zp_find_git_dir) || return
+  local repo_root=${gdir:h}
+  local index="$gdir/index"
+
+  local -a st; zstat -A st +mtime -- "$index" 2>/dev/null || st=(0)
+  local mtime=${st[1]:-0}
+  local key="${repo_root:A}"
+
+  if [[ ${__ZP_GIT_CACHE_MTIME[$key]} == "$mtime" && -n ${__ZP_GIT_CACHE_STR[$key]} ]]; then
+    print -r -- "${__ZP_GIT_CACHE_STR[$key]}"; return
+  fi
+
+  local br
+  br=$(command git -C "$repo_root" symbolic-ref --short -q HEAD 2>/dev/null || \
+      command git -C "$repo_root" rev-parse --short HEAD 2>/dev/null) || return
+
+  local seg="${_c_git}[${br}]${_n}"
+  __ZP_GIT_CACHE_MTIME[$key]="$mtime"
+  __ZP_GIT_CACHE_STR[$key]="$seg"
+  print -r -- "$seg"
+}
+
+# Tags
+venv_tag() { [[ -n $VIRTUAL_ENV ]] && print -r -- "${_c_tag}(${${VIRTUAL_ENV:t}})${_n}"; }
+jobs_tag() { (( ${#jobstates} )) && print -r -- "${_c_tag}⚙︎${#jobstates}${_n}"; }
+exit_tag() { (( $1 == 0 )) || print -r -- "${_c_err}[${1}]${_n}"; }
+mode_tag() {
+  case $KEYMAP in
+    vicmd)  print -r -- "%F{red}[N]%f" ;;
+    visual) print -r -- "%F{magenta}[V]%f" ;;
+    *)      print -r -- "%F{green}[I]%f" ;;
+  esac
+}
+
+# Keymap refresh
+zle-keymap-select() { zle reset-prompt }
+zle -N zle-keymap-select
+
+# Short pwd
+short_pwd() { print -P "%~"; }
+
+# Main prompt
+build_prompt() {
+  local st=$?
+  local smiley suffix cwd_color
+  if [[ $EUID -eq 0 ]]; then
+    smiley='%F{yellow}'>:D'%f'; suffix='#'; cwd_color=$_c_cwd_root
+  else
+    smiley='%F{yellow}':D'%f'; suffix='>'; cwd_color=$_c_cwd
+  fi
+
+  local left="${_c_user}${USER}@${_c_host}${__ZP_HOST} ${cwd_color}$(short_pwd)${_n}"
+  local git="$(git_segment)"
+  [[ -n $git ]] && left+=" ${git}"
+
+  PS1="${left}
+${smiley} ${suffix} "
+
+  local right="$(mode_tag) $(venv_tag) $(jobs_tag) $(fmt_dur) $(exit_tag $st)"
+  right="${right//  / }"; right="${right## }"
+  RPROMPT="$right"
+}
+
+precmd_functions+=build_prompt
+{{- else }}
+# Agnoster handles the prompt on non-mac machines
+{{- end }}
+
+# Neofetch banner
+[[ -f "$HOME/.neofetch" ]] && cat "$HOME/.neofetch"
+
+# ──────────────────────────────────────────────
+# Aliases
+# ──────────────────────────────────────────────
+[[ -f "$HOME/.zshrc.aliases.zsh" ]] && source "$HOME/.zshrc.aliases.zsh"
+[[ -f "$HOME/.aliases.local.zsh" ]] && source "$HOME/.aliases.local.zsh"
+
+# ──────────────────────────────────────────────
+# Completions
+# ──────────────────────────────────────────────
+{{ if .modules.nvm -}}
+[ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"
+{{ end -}}
+
+{{- if eq .chezmoi.os "darwin" }}
+fpath=($HOME/.docker/completions $fpath)
+{{- end }}
+autoload -Uz compinit
+compinit

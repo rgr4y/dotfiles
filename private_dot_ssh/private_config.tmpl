@@ -1,0 +1,24 @@
+Host github.com
+    HostName github.com
+    User git
+    ForwardAgent no
+    ForwardX11 no
+    PermitLocalCommand no
+    ClearAllForwardings yes
+
+Host *
+    Compression yes
+    ForwardAgent yes
+    IgnoreUnknown UseKeychain,AddKeysToAgent
+    AddKeysToAgent yes
+    UseKeychain yes
+    ControlMaster auto
+    ControlPath ~/.ssh/cm-%r@%h:%p
+    ControlPersist 10m
+    ServerAliveInterval 60
+    ServerAliveCountMax 3
+
+Host *.bc.googleusercontent.com
+    StrictHostKeyChecking no
+    UserKnownHostsFile /dev/null
+    LogLevel QUIET

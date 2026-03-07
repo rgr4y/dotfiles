@@ -1,0 +1,125 @@
+#!/usr/bin/env perl
+use strict;
+use warnings;
+use Config;
+
+sub parse_ss_udp_table_linux {
+    my %seen;
+    my @rows;
+
+    open(my $fh, "-|", "ss -tunlp") or die "Failed to run ss: $!";
+
+    while (<$fh>) {
+        next unless /LISTEN|UNCONN/;
+
+        my ($proto) = split;
+        my ($addrport) = /\s([^\s\[]+:\d+|\[[^\]]+\]:\d+)/;
+        next unless $addrport;
+
+        my ($addr, $port);
+        if ($addrport =~ /^\[(.+)\]:(\d+)$/) {
+            ($addr, $port) = ($1, $2);
+        } elsif ($addrport =~ /^(.+):(\d+)$/) {
+            ($addr, $port) = ($1, $2);
+        } else {
+            next;
+        }
+
+        $addr =~ s/%.*$//;
+        $addr = "*" if $addr eq "";
+
+        my ($pid, $proc) = $_ =~ /pid=(\d+),fd=\d+\)\)\s*$/;
+        ($proc) = $_ =~ /users:\(\("([^"]+)"/ unless $proc;
+        my $pidproc = ($pid && $proc) ? "$pid/$proc" : "-";
+
+        my $key = "$proto\t$port\t$addr";
+        next if $seen{$key}++;
+
+        push @rows, [$port + 0, $proto, $port, $addr, $pidproc];
+    }
+
+    return @rows;
+}
+
+sub parse_listen_table_macos {
+    my %seen;
+    my @rows;
+
+    open(my $fh, "-|", "lsof -P -n 2>/dev/null | grep LISTEN") or die "Failed to run lsof: $!";
+
+    while (<$fh>) {
+        my @fields = split;
+        next unless @fields >= 9;
+
+        my ($proc, $pid, $addrport) = ($fields[0], $fields[1], $fields[-2]);
+        my ($addr, $port);
+
+        if ($addrport =~ /^\[(.+)\]:(\d+)$/) {
+            ($addr, $port) = ($1, $2);
+        } elsif ($addrport =~ /^(.+):(\d+)$/) {
+            ($addr, $port) = ($1, $2);
+        } else {
+            next;
+        }
+
+        $addr =~ s/%.*$//;
+        $addr = "*" if $addr eq "";
+
+        my $key = "tcp\t$port\t$addr";
+        next if $seen{$key}++;
+
+        push @rows, [$port + 0, "tcp", $port, $addr, "$pid/$proc"];
+    }
+
+    return @rows;
+}
+
+sub print_ascii_table {
+    my @rows = @_;
+    @rows = sort { $a->[0] <=> $b->[0] } @rows;
+
+    my @headers = ('Proto', 'Port', 'Address', 'PID/Process');
+    my @width = map { length($_) } @headers;
+
+    for my $r (@rows) {
+        for my $i (1..4) {
+            $width[$i-1] = length($r->[$i]) if length($r->[$i]) > $width[$i-1];
+        }
+    }
+
+    my $line = "+" . join("+", map { '-' x ($_ + 2) } @width) . "+";
+    print "$line\n";
+    printf "| %-*s | %-*s | %-*s | %-*s |\n",
+        $width[0], $headers[0],
+        $width[1], $headers[1],
+        $width[2], $headers[2],
+        $width[3], $headers[3];
+    print "$line\n";
+
+    for my $r (@rows) {
+        printf "| %-*s | %-*s | %-*s | %-*s |\n",
+            $width[0], $r->[1],
+            $width[1], $r->[2],
+            $width[2], $r->[3],
+            $width[3], $r->[4];
+    }
+    print "$line\n";
+}
+
+# Main dispatcher
+sub main {
+    my $osname = $^O;
+    my @rows;
+
+    if ($osname eq 'darwin') {
+        @rows = parse_listen_table_macos();
+    } elsif ($osname eq 'linux') {
+        @rows = parse_ss_udp_table_linux();
+    } else {
+        die "Unsupported OS: $osname\n";
+    }
+
+    print_ascii_table(@rows);
+}
+
+main() if !caller();

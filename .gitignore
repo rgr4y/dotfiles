@@ -1,0 +1,8 @@
+.DS_Store
+*.swp
+*.swo
+*.swn
+*~
+.netrwhist
+dotfiles-backup-*
+dot_tmux/plugins/*/dot_git/

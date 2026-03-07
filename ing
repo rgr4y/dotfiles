@@ -1,0 +1,54 @@
+#!/bin/bash
+#!/usr/bin/env bash
+
+GITHUB_USERNAME=rgr4y
+
+sh -c "$(curl -fsLS get.chezmoi.io)" -- init --apply "$GITHUB_USERNAME"
+
+# set zsh as default shell if it isn't already
+if command -v zsh >/dev/null 2>&1; then
+  ZSH_PATH=$(which zsh)
+  if [ "$SHELL" != "$ZSH_PATH" ]; then
+    if sudo -n true 2>/dev/null; then
+      sudo chsh -s "$ZSH_PATH" "$(whoami)"
+      echo "[ing] default shell → zsh"
+    else
+      echo "[ing] can't sudo without password — run: chsh -s $ZSH_PATH"
+    fi
+  fi
+fi
+
+s='oOOooOoOoOooooOOoooOOoooOO'
+end=$((SECONDS+2))
+
+while [ "$SECONDS" -lt "$end" ]; do
+  out=""
+  i=0
+  while [ "$i" -lt "${#s}" ]; do
+    c=${s:$i:1}
+    if [[ "$c" =~ [A-Za-z] ]]; then
+      if [ $((RANDOM % 2)) -eq 0 ]; then
+        out="${out}$(printf '%s' "$c" | tr '[:lower:]' '[:upper:]')"
+      else
+        out="${out}$(printf '%s' "$c" | tr '[:upper:]' '[:lower:]')"
+      fi
+    else
+      out="${out}$c"
+    fi
+    i=$((i+1))
+  done
+  printf '%s' "$out"
+  sleep 0.01
+done
+printf '\n'
+
+rm -f $HOME/.ing-bootstrap.done
+rm -f $HOME/.zlogin
+
+# force reconnect so next session starts from a clean login shell
+if [[ -n "${SSH_TTY:-}" && -z "${TMUX:-}" ]]; then
+  echo "[ing] bootstrap complete; disconnecting so you can reconnect..."
+  sleep 1
+  kill -HUP "$PPID"
+  exit 0
+fi

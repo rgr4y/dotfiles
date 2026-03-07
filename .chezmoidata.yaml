@@ -1,0 +1,10 @@
+profile: bare
+modules:
+  nvm: false
+  pyenv: false
+  bun: false
+  php: false
+  copilot: false
+  tmux: false
+  fzf: false
+  vscode: false

@@ -1,0 +1,29 @@
+{
+  "suggest.noselect": false,
+  "suggest.enablePreselect": false,
+  "suggest.snippetsSupport": true,
+  "suggest.minTriggerInputLength": 2,
+  "diagnostic.checkCurrentLine": true,
+  "diagnostic.virtualText": true,
+  "diagnostic.virtualTextPrefix": " ► ",
+  "coc.preferences.formatOnSaveFiletypes": [
+    "javascript",
+    "javascriptreact",
+    "typescript", 
+    "typescriptreact",
+    "json",
+    "yaml",
+    "markdown",
+    "python"
+  ],
+  "prettier.singleQuote": true,
+  "prettier.trailingComma": "all",
+  
+  "python.linting.enabled": true,
+  "python.linting.pylintEnabled": true,
+  "python.linting.flake8Enabled": false,
+  "python.linting.mypyEnabled": true,
+  "python.formatting.provider": "black",
+  "pyright.disableOrganizeImports": false,
+  "snippets.ultisnips.pythonPrompt": false
+}

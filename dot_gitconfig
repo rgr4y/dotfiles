@@ -1,0 +1,60 @@
+[core]
+    excludesfile = ~/.gitignore_global
+  whitespace = cr-at-eol
+[color]
+    ui = auto
+[alias]
+    a = add
+    l = log --color --graph --pretty=format:'%Cred%h%Creset -%C(yellow)%d%Creset %s %Cgreen(%ad) %C(bold blue)<%an>%Creset' --abbrev-commit --date=short
+    lp = log -p --color --graph --pretty=format:'%Cred%h%Creset -%C(yellow)%d%Creset %s %Cgreen(%cr) %C(bold blue)<%an>%Creset' --abbrev-commit
+    r = reset
+    p = stage --patch
+    d  = diff
+    dt = difftool
+    dc = diff --cached
+    dtc = difftool --cached
+    br = branch
+    st = status
+    si = stage --interactive
+    ci = commit
+    co = checkout
+    ps = push
+    pl = pull
+    plr = pull --rebase
+    sm = submodule
+    submodules = submodule
+[user]
+	name = Rob Vella 
+	email = me@robvella.com
+[difftool]
+    prompt = false
+[diff]
+        tool = sourcetree
+[difftool "sourcetree"]
+
+	cmd = opendiff \"$LOCAL\" \"$REMOTE\"
+	path = 
+[push]
+	default = current
+[help]
+    autocorrect = 1
+[filter "media"]
+	clean = git-media-clean %f
+	smudge = git-media-smudge %f
+[pager]
+	diff = diff-so-fancy | less --tabs=1,5 -RFX
+	show = diff-so-fancy | less --tabs=1,5 -RFX
+[color "diff-highlight"]
+	oldNormal = red bold
+	oldHighlight = red bold 52
+	newNormal = green bold
+	newHighlight = green bold 22
+[filter "lfs"]
+	clean = git-lfs clean -- %f
+	smudge = git-lfs smudge -- %f
+	process = git-lfs filter-process
+	required = true
+[pull]
+	rebase = false
+[init]
+	defaultBranch = main

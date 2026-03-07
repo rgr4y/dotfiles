@@ -1,0 +1,24 @@
+# Always ignore
+.DS_Store
+**/.netrwhist
+**/undodir/**
+**/*.swp
+**/*.swo
+**/*.swn
+.zsh_history
+.bash_history
+install.sh
+docs/**
+README.md
+.gitignore
+
+# Ignore vim CoC settings on bare profile
+{{ if eq .profile "bare" }}
+.vim/coc-settings.json
+{{ end }}
+
+# Ignore tmux config if tmux module not selected
+{{ if not .modules.tmux }}
+.tmux.conf
+.tmux/**
+{{ end }}

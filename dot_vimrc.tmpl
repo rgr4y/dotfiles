@@ -1,0 +1,223 @@
+" Basic
+syntax on
+set ruler
+set nu
+set clipboard=
+set laststatus=2
+set pastetoggle=<F2>
+
+" True colors
+if has('termguicolors')
+    set termguicolors
+endif
+
+set shell=/bin/zsh
+set encoding=utf8
+set guifont=Inconsolata\ for\ Powerline\ Plus\ Nerd\ File\ Types:h14
+set background=dark
+
+" Modern vim settings
+set hidden
+set signcolumn=yes
+set updatetime=300
+
+autocmd filetype crontab setlocal nobackup nowritebackup
+autocmd FileType python,yaml setlocal autoindent smartindent
+
+" macOS cursor shapes
+if has('macunix') || has('mac') || system('uname') =~? '^darwin'
+    let &t_SI = "\<Esc>[6 q"
+    let &t_SR = "\<Esc>[4 q"
+    let &t_EI = "\<Esc>[2 q"
+endif
+
+" Mappings
+nmap <S-Tab> <<
+imap <S-Tab> <Esc>:exe "normal <<"<CR>i
+vmap <Tab> >
+vmap <S-Tab> <
+vmap Y :w !pbcopy<CR><CR>
+imap <Char-0x13> <esc>:w<CR>gv
+
+" Cmd+S = save
+nnoremap <D-s> :w<CR>
+inoremap <D-s> <Esc>:w<CR>i
+vnoremap <D-s> <Esc>:w<CR>gv
+
+nnoremap <leader>f :call FoldColumnToggle()<cr>
+
+" Ctrl+Z = undo
+nnoremap <C-z> u
+inoremap <C-z> <C-o>u
+vnoremap <C-z> <Esc>u
+
+" Force paste
+function! ForcePaste()
+  let l:was_paste = &paste
+  set paste
+  if has('clipboard')
+    silent! normal! "+p
+  else
+    silent! normal! p
+  endif
+  if !l:was_paste
+    set nopaste
+  endif
+endfunction
+
+nnoremap <M-v> :call ForcePaste()<CR>
+inoremap <M-v> <Esc>:call ForcePaste()<CR>i
+vnoremap <M-v> <Esc>:call ForcePaste()<CR>gv
+
+" Mouse
+set mouse=a
+
+" Tabs
+set expandtab
+set tabstop=4
+set shiftwidth=4
+
+" Bracketed paste
+set nopaste
+if &t_BE ==# '' | let &t_BE = "\e[?2004h" | endif
+if &t_BD ==# '' | let &t_BD = "\e[?2004l" | endif
+let &t_PS = "\e[200~"
+let &t_PE = "\e[201~"
+
+" No auto text wrapping
+set formatoptions-=t
+set formatoptions-=c
+set formatoptions-=r
+
+" Wrapping
+set wm=0
+set tw=0
+set nowrap
+
+set cursorline
+
+" File handling
+set nobackup
+set noswapfile
+set undofile
+set undodir=~/.vim/undodir
+
+" Searching
+set hlsearch
+set incsearch
+set ignorecase
+set smartcase
+
+set backspace=indent,eol,start
+
+set nocompatible
+filetype plugin indent on
+
+" ════════════════════════════════════════════
+" Plugins
+" ════════════════════════════════════════════
+call plug#begin('~/.vim/plugged')
+
+" ── Always ──────────────────────────────────
+Plug 'sheerun/vim-polyglot'
+Plug 'tpope/vim-surround'
+Plug 'tpope/vim-repeat'
+Plug 'tpope/vim-commentary'
+
+{{ if eq .profile "bare" -}}
+" ── Bare: lightweight linting ───────────────
+Plug 'dense-analysis/ale'
+{{ end -}}
+
+{{ if eq .profile "full" -}}
+" ── Full: Git ───────────────────────────────
+Plug 'tpope/vim-fugitive'
+Plug 'airblade/vim-gitgutter'
+Plug 'tpope/vim-rhubarb'
+
+" ── Full: Navigation ────────────────────────
+Plug 'junegunn/fzf', { 'do': { -> fzf#install() } }
+Plug 'junegunn/fzf.vim'
+Plug 'mbbill/undotree'
+Plug 'preservim/tagbar'
+
+" ── Full: Editing ───────────────────────────
+Plug 'tpope/vim-unimpaired'
+Plug 'mattn/emmet-vim'
+
+" ── Full: UI ────────────────────────────────
+Plug 'vim-airline/vim-airline'
+Plug 'vim-airline/vim-airline-themes'
+Plug 'ryanoasis/vim-devicons'
+Plug 'mhinz/vim-startify'
+Plug 'luochen1990/rainbow'
+
+" ── Full: Language Support ──────────────────
+Plug 'pangloss/vim-javascript'
+Plug 'HerringtonDarkholme/yats.vim'
+Plug 'styled-components/vim-styled-components'
+Plug 'cespare/vim-toml'
+Plug 'MTDL9/vim-log-highlighting'
+Plug 'chrisbra/vim-zsh'
+Plug 'StanAngeloff/php.vim'
+
+" ── Full: Code Intelligence ─────────────────
+Plug 'dense-analysis/ale'
+Plug 'pechorin/any-jump.vim'
+
+" ── Full: File Management ───────────────────
+Plug 'preservim/nerdtree'
+Plug 'Xuyuanp/nerdtree-git-plugin'
+
+" ── Full: Terminal ──────────────────────────
+Plug 'voldikss/vim-floaterm'
+
+" ── Full: Testing ───────────────────────────
+Plug 'vim-test/vim-test'
+
+" ── Full: Session & Tmux ────────────────────
+Plug 'tpope/vim-obsession'
+Plug 'christoomey/vim-tmux-navigator'
+{{ end -}}
+
+call plug#end()
+
+colorscheme darcula
+
+{{ if eq .profile "full" -}}
+" ════════════════════════════════════════════
+" Full Profile: Plugin Config
+" ════════════════════════════════════════════
+
+" Airline
+let g:airline_powerline_fonts = 1
+let g:airline_theme='cool'
+
+" PHP syntax
+function! PhpSyntaxOverride()
+  hi! def link phpDocTags  phpDefine
+  hi! def link phpDocParam phpType
+endfunction
+
+augroup phpSyntaxOverride
+  autocmd!
+  autocmd FileType php call PhpSyntaxOverride()
+augroup END
+
+" FZF mappings
+nnoremap <C-p> :Files<CR>
+nnoremap <leader>F :GFiles<CR>
+nnoremap <leader>b :Buffers<CR>
+nnoremap <leader>g :Rg<CR>
+nnoremap <leader>t :Tags<CR>
+nnoremap <leader>m :Marks<CR>
+
+" Terminal
+nnoremap <leader>tt :terminal<CR>
+tnoremap <Esc> <C-\><C-n>
+{{ end -}}
+
+" Create undodir if needed
+if !isdirectory($HOME."/.vim/undodir")
+    call mkdir($HOME."/.vim/undodir", "p", 0700)
+endif
