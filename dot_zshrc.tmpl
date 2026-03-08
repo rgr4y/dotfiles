@@ -345,4 +345,6 @@ precmd_functions+=build_prompt
 fpath=($HOME/.docker/completions $fpath)
 {{- end }}
 autoload -Uz compinit
+# Strip any fpath entries that don't exist (avoids compinit errors from missing zi completions)
+fpath=(${^fpath}(N))
 compinit

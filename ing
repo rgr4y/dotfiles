@@ -4,11 +4,16 @@
 GITHUB_USERNAME=rgr4y
 
 choose_profile() {
-  echo "[ing] Choose your setup:"
-  echo "  1) Full (Recommended) — everything enabled"
-  echo "  2) Lite — minimal plugins and extras"
-  printf "[ing] Enter 1 or 2 (default: 1): "
-  read -r choice
+  local choice=""
+  if [ -t 0 ] && [ -r /dev/tty ]; then
+    {
+      echo "[ing] Choose your setup:"
+      echo "  1) Full (Recommended) — everything enabled"
+      echo "  2) Lite — minimal plugins and extras"
+      printf "[ing] Enter 1 or 2 (default: 1): "
+    } > /dev/tty
+    read -r choice < /dev/tty
+  fi
   case "${choice:-1}" in
     1|full|FULL|Full) echo "full" ;;
     2|lite|LITE|Lite|bare|BARE|Bare) echo "bare" ;;
@@ -19,7 +24,11 @@ choose_profile() {
 PROFILE="$(choose_profile)"
 echo "[ing] Profile → ${PROFILE}"
 
-sh -c "$(curl -fsLS get.chezmoi.io)" -- init --apply -D profile="$PROFILE" "$GITHUB_USERNAME"
+if ! command -v chezmoi >/dev/null 2>&1; then
+  sh -c "$(curl -fsLS get.chezmoi.io)"
+fi
+
+chezmoi init --apply -D profile="$PROFILE" "$GITHUB_USERNAME"
 
 # set zsh as default shell if it isn't already
 if command -v zsh >/dev/null 2>&1; then
