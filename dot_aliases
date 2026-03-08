@@ -1,0 +1,6 @@
+# Fallback alias file for bash/sh/legacy shells
+# ZSH sources ~/.zshrc.aliases.zsh directly; this exists as a portable fallback
+
+if [ -f "$HOME/.zshrc.aliases.zsh" ]; then
+  . "$HOME/.zshrc.aliases.zsh"
+fi
