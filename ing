@@ -30,10 +30,18 @@ if ! command -v chezmoi >/dev/null 2>&1; then
   export PATH="$HOME/.local/bin:$PATH"
 fi
 
+# Write profile into chezmoi data before apply so templates can use it
+CHEZMOI_DATA="$HOME/.config/chezmoi/chezmoi.yaml"
+mkdir -p "$(dirname "$CHEZMOI_DATA")"
+cat > "$CHEZMOI_DATA" <<EOF
+data:
+  profile: ${PROFILE}
+EOF
+
 if [[ -d "$HOME/.local/share/chezmoi/.git" ]]; then
-  chezmoi update -D profile="$PROFILE"
+  chezmoi update
 else
-  chezmoi init --apply -D profile="$PROFILE" "$GITHUB_USERNAME"
+  chezmoi init --apply "$GITHUB_USERNAME"
 fi
 
 # set zsh as default shell if it isn't already
