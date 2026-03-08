@@ -28,7 +28,11 @@ if ! command -v chezmoi >/dev/null 2>&1; then
   sh -c "$(curl -fsLS get.chezmoi.io)"
 fi
 
-chezmoi init --apply -D profile="$PROFILE" "$GITHUB_USERNAME"
+if chezmoi source-path >/dev/null 2>&1; then
+  chezmoi update -D profile="$PROFILE"
+else
+  chezmoi init --apply -D profile="$PROFILE" "$GITHUB_USERNAME"
+fi
 
 # set zsh as default shell if it isn't already
 if command -v zsh >/dev/null 2>&1; then
