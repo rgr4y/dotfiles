@@ -1,0 +1,33 @@
+# ──────────────────────────────────────────────
+# NVM (lazy-loaded)
+# ──────────────────────────────────────────────
+export NVM_DIR="$HOME/.nvm"
+
+nvm() {
+  unfunction nvm npm npx node
+  [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+  nvm "$@"
+}
+npm() {
+  unfunction nvm npm npx node
+  [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+  npm "$@"
+}
+npx() {
+  unfunction nvm npm npx node
+  [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+  npx "$@"
+}
+node() {
+  unfunction nvm npm npx node
+  [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+  node "$@"
+}
+
+nvm_find_nvmrc() {
+  local dir="$(pwd)"
+  while [[ "$dir" != "/" ]]; do
+    [[ -f "$dir/.nvmrc" ]] && echo "$dir/.nvmrc" && return
+    dir="$(dirname "$dir")"
+  done
+}

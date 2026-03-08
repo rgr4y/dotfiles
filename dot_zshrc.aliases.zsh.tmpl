@@ -15,16 +15,27 @@ alias gplom='git pull origin master'
 alias gcam='git commit -am'
 alias gcm='git commit -m'
 alias master='git checkout master'
+alias main='git checkout main'
 alias dev='git checkout dev'
 alias staging='git checkout staging'
 alias gmd='gpo ; git checkout master ; git merge dev ; gpo'
 alias gma='gpo ; git checkout dev ; git merge master ; gpo ; git checkout master'
 alias gmm='dev; git merge master ; gpo'
+alias gtrack='git branch --set-upstream-to=origin/$(git branch --show-current)'
 
 # ── Navigation / General ────────────────────
 alias more='less -FX'
 alias tmls='tmux list-sessions'
 alias ehost='sudo vim /etc/hosts'
+alias logs='lnav'
+alias l='ls -CF'
+alias la='ls -A'
+alias ll='ls -alh'
+alias ..='cd ..'
+alias ...='cd ../..'
+alias ....='cd ../../..'
+alias -- -1='cd -1'
+alias -- -2='cd -2'
 
 # ── Vim plugin management ───────────────────
 alias vpi='vim +PlugInstall +qall'
@@ -38,30 +49,44 @@ alias nslookup6='nslookup -query=AAAA'
 
 {{ if eq .chezmoi.os "darwin" -}}
 # ── macOS-specific ──────────────────────────
-alias pubkey='PUBKEY=$(<~/.ssh/pubkey) && echo $PUBKEY | pbcopy && echo $PUBKEY'
-alias sshfs_unmount='diskutil unmount force $HOME/workspace/homeassistant'
+pubkey() {
+  # Copy public key to clipboard and echo it back.
+  local key_path="$HOME/.ssh/pubkey"
+  if [ ! -r "$key_path" ]; then
+    key_path="$HOME/.ssh/id_ed25519.pub"
+  fi
+  if [ ! -r "$key_path" ]; then
+    key_path="$(ls -1 "$HOME/.ssh/"*.pub 2>/dev/null | head -n 1)"
+  fi
+  if [ -r "$key_path" ]; then
+    pbcopy < "$key_path"
+    cat "$key_path"
+    return 0
+  fi
+  echo "pubkey: no readable public key found in $HOME/.ssh" >&2
+  return 1
+}
 alias wireshark='/Applications/Wireshark.app/Contents/MacOS/Wireshark'
+alias sudo="/usr/bin/sudo -s"
+alias lock="sudo chflags schg"
+alias unlock="sudo chflags noschg"
+
+pbcat() {
+  local src="${1%}"
+  cat "$src" | pbcopy
+}
+
+phpstorm() {
+  open -a PhpStorm "${1:-.}"
+}
 {{ end -}}
 
 {{ if eq .chezmoi.os "linux" -}}
 # ── Linux-specific ──────────────────────────
 alias python="python3"
 alias pip="pip3"
-{{ end -}}
-
-{{ if .modules.php -}}
-# ── PHP / Docker ────────────────────────────
-phpd() {
-  docker exec -it nd_php php "$@"
-}
-
-php7.3() {
-  docker exec -it nd_php php "$@"
-}
-
-yarnd() {
-  docker exec -it nd_yarn yarn "$@"
-}
+alias lock="sudo chattr +i"
+alias unlock="sudo chattr -i"
 {{ end -}}
 
 # ── Functions ───────────────────────────────

@@ -85,8 +85,7 @@ zi light alexrochas/zsh-path-environment-explorer
 if [[ "$TERM_PROGRAM" == "vscode" || "$TERMINAL_EMULATOR" == "JetBrains-JediTerm" ]]; then
   {{ if .modules.nvm -}}
   # Lazy-load nvm for vscode
-  export NVM_DIR="$HOME/.nvm"
-  [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+  [[ -f "$HOME/.zshrc.nvm.zsh" ]] && source "$HOME/.zshrc.nvm.zsh"
   {{ end -}}
   {{ if .modules.bun -}}
   export BUN_INSTALL="$HOME/.bun"
@@ -101,36 +100,7 @@ fi
 # ──────────────────────────────────────────────
 # NVM (lazy-loaded)
 # ──────────────────────────────────────────────
-export NVM_DIR="$HOME/.nvm"
-
-nvm() {
-  unfunction nvm npm npx node
-  [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
-  nvm "$@"
-}
-npm() {
-  unfunction nvm npm npx node
-  [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
-  npm "$@"
-}
-npx() {
-  unfunction nvm npm npx node
-  [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
-  npx "$@"
-}
-node() {
-  unfunction nvm npm npx node
-  [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
-  node "$@"
-}
-
-nvm_find_nvmrc() {
-  local dir="$(pwd)"
-  while [[ "$dir" != "/" ]]; do
-    [[ -f "$dir/.nvmrc" ]] && echo "$dir/.nvmrc" && return
-    dir="$(dirname "$dir")"
-  done
-}
+[[ -f "$HOME/.zshrc.nvm.zsh" ]] && source "$HOME/.zshrc.nvm.zsh"
 {{ end -}}
 
 {{ if .modules.pyenv -}}
@@ -368,7 +338,7 @@ precmd_functions+=build_prompt
 # Completions
 # ──────────────────────────────────────────────
 {{ if .modules.nvm -}}
-[ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"
+[ -n "$NVM_DIR" ] && [ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"
 {{ end -}}
 
 {{- if eq .chezmoi.os "darwin" }}
