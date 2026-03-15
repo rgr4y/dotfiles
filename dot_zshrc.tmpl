@@ -211,17 +211,17 @@ fi
 # We just redefine PROMPT to include both agnoster + emoji line.
 __emoji_face() {
   if [[ $EUID -eq 0 ]]; then
-    print -n '😈 %F{blue}%f '
+    print -n '😈'
   elif [[ $__zp_last_status -ne 0 ]]; then
-    print -n '😡 %F{blue}%f '
+    print -n '😡'
   else
-    print -n '😀 %F{blue}%f '
+    print -n '😀'
   fi
 }
 __emoji_capture_status() { __zp_last_status=$?; }
 precmd_functions=(__emoji_capture_status $precmd_functions)
 PROMPT='%{%f%b%k%}$(build_prompt)
-$(__emoji_face)'
+$(__emoji_face) %F{blue}%f '
 
 # Neofetch banner
 [[ -f "$HOME/.neofetch" ]] && cat "$HOME/.neofetch"
