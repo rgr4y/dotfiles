@@ -57,13 +57,6 @@ fi
 
 [[ -f "$HOME/.zi/bin/zi.zsh" ]] && source "$HOME/.zi/bin/zi.zsh"
 
-# Agnoster theme via zi (no OMZ needed)
-zi snippet OMZL::git.zsh
-zi snippet OMZL::theme-and-appearance.zsh
-zi snippet OMZT::agnoster
-
-# Stub out OMZ prompt functions agnoster expects
-(( ${+functions[tf_prompt_info]} )) || tf_prompt_info() { : }
 
 # Core plugins (always)
 zi light zsh-users/zsh-autosuggestions
@@ -203,38 +196,11 @@ elif [[ -f /usr/share/doc/fzf/examples/key-bindings.zsh ]]; then
 fi
 {{ end -}}
 
-# ──────────────────────────────────────────────
-# Prompt
-# ──────────────────────────────────────────────
-# Agnoster is loaded above via zi. Add emoji on line 2.
-# Agnoster sets PROMPT='%{%f%b%k%}$(build_prompt) ' with prompt_subst.
-# We just redefine PROMPT to include both agnoster + emoji line.
-__emoji_face() {
-  if [[ $EUID -eq 0 ]]; then
-    print -n '😈'
-  elif [[ $__zp_last_status -ne 0 ]]; then
-    print -n '😡'
-  else
-    print -n '😀'
-  fi
-}
-__emoji_capture_status() { __zp_last_status=$?; }
-precmd_functions=(__emoji_capture_status $precmd_functions)
-PROMPT='%{%f%b%k%}$(build_prompt)
-$(__emoji_face) %F{blue}%f '
-
-# Neofetch banner
+[[ -f "$HOME/.zshrc.prompt.zsh" ]] && source "$HOME/.zshrc.prompt.zsh"
 [[ -f "$HOME/.neofetch" ]] && cat "$HOME/.neofetch"
-
-# ──────────────────────────────────────────────
-# Aliases
-# ──────────────────────────────────────────────
 [[ -f "$HOME/.zshrc.aliases.zsh" ]] && source "$HOME/.zshrc.aliases.zsh"
 [[ -f "$HOME/.aliases.local.zsh" ]] && source "$HOME/.aliases.local.zsh"
 
-# ──────────────────────────────────────────────
-# Completions
-# ──────────────────────────────────────────────
 {{ if .modules.nvm -}}
 [ -n "$NVM_DIR" ] && [ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"
 {{ end -}}

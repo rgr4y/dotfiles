@@ -1,0 +1,125 @@
+# ──────────────────────────────────────────────
+# Custom Prompt
+# ──────────────────────────────────────────────
+
+# Cache hostname once
+: ${__ZP_HOST:=$(hostname -s)}
+
+# Colors
+local _n='%f' _dim='%F{245}'
+local _c_host='%F{cyan}' _c_cwd='%F{33}'
+local _c_cwd_root='%F{red}' _c_git='%F{203}' _c_err='%F{196}' _c_time='%F{244}' _c_tag='%F{141}'
+
+setopt prompt_subst
+autoload -U add-zsh-hook
+zmodload zsh/datetime
+zmodload -F zsh/stat b:zstat
+
+# Command duration
+typeset -gF __ZP_TSTART=0.0
+preexec() { __ZP_TSTART=$EPOCHREALTIME }
+fmt_dur() {
+  (( __ZP_TSTART )) || return
+  local elapsed=$(( EPOCHREALTIME - __ZP_TSTART ))
+  local ms=$(( elapsed * 1000.0 ))
+  local ms_int=${ms%.*}
+  (( ms_int < 2000 )) && return
+  if (( ms_int < 60000 )); then
+    print -r -- "${_c_time}${ms_int}ms${_n}"
+  else
+    local s=$(( ms_int / 1000 ))
+    print -r -- "${_c_time}$(( s / 60 ))m$(( s % 60 ))s${_n}"
+  fi
+}
+
+# Git (fast, cached)
+typeset -gA __ZP_GIT_CACHE_MTIME __ZP_GIT_CACHE_STR
+
+__zp_find_git_dir() {
+  local dir=$PWD
+  while [[ $dir != / ]]; do
+    if [[ -d $dir/.git ]]; then
+      print -r -- "$dir/.git $dir"; return 0
+    elif [[ -f $dir/.git ]]; then
+      local gd; gd=$(<"$dir/.git"); gd=${gd#gitdir: }; gd=${gd## }; gd=${gd%% }
+      [[ -z $gd ]] && return 1
+      [[ $gd = /* ]] || gd="$dir/$gd"
+      print -r -- "$gd $dir"; return 0
+    fi
+    dir=${dir:h}
+  done
+  return 1
+}
+
+git_segment() {
+  local __out; __out=$(__zp_find_git_dir) || return
+  local gdir=${__out%% *}
+  local repo_root=${__out#* }
+  local index="$gdir/index"
+
+  local -a st; zstat -A st +mtime -- "$index" 2>/dev/null || st=(0)
+  local mtime=${st[1]:-0}
+  local key="${repo_root:A}"
+
+  if [[ ${__ZP_GIT_CACHE_MTIME[$key]} == "$mtime" && -n ${__ZP_GIT_CACHE_STR[$key]} ]]; then
+    print -r -- "${__ZP_GIT_CACHE_STR[$key]}"; return
+  fi
+
+  local br
+  br=$(command git -C "$repo_root" symbolic-ref --short -q HEAD 2>/dev/null || \
+      command git -C "$repo_root" rev-parse --short HEAD 2>/dev/null) || return
+
+  local seg="${_c_git}[${br}]${_n}"
+  __ZP_GIT_CACHE_MTIME[$key]="$mtime"
+  __ZP_GIT_CACHE_STR[$key]="$seg"
+  print -r -- "$seg"
+}
+
+# Tags
+venv_tag() { [[ -n $VIRTUAL_ENV ]] && print -r -- "${_c_tag}(${${VIRTUAL_ENV:t}})${_n}"; }
+jobs_tag() { (( ${#jobstates} )) && print -r -- "${_c_tag}⚙︎${#jobstates}${_n}"; }
+exit_tag() { (( $1 == 0 )) || print -r -- "${_c_err}[${1}]${_n}"; }
+mode_tag() {
+  case $KEYMAP in
+    vicmd)  print -r -- "%F{red}[N]%f" ;;
+    visual) print -r -- "%F{magenta}[V]%f" ;;
+    *)      print -r -- "%F{green}[I]%f" ;;
+  esac
+}
+
+# Keymap refresh
+zle-keymap-select() { zle reset-prompt }
+zle -N zle-keymap-select
+
+# Short pwd
+short_pwd() { print -P "%~"; }
+
+# Main prompt
+build_prompt() {
+  local st=$?
+  local smiley suffix cwd_color
+  if [[ $EUID -eq 0 ]]; then
+    smiley='😈'; suffix='#'; cwd_color=$_c_cwd_root
+  elif [[ $st -ne 0 ]]; then
+    smiley='😡'; suffix='>'; cwd_color=$_c_cwd
+  else
+    smiley='😀'; suffix='>'; cwd_color=$_c_cwd
+  fi
+
+  local left="${_c_host}${__ZP_HOST} ${cwd_color}$(short_pwd)${_n}"
+  local git="$(git_segment)"
+  [[ -n $git ]] && left+=" ${git}"
+
+  local -a parts
+  local p
+  for p in "$(mode_tag)" "$(venv_tag)" "$(jobs_tag)" "$(fmt_dur)" "$(exit_tag $st)"; do
+    [[ -n $p ]] && parts+=("$p")
+  done
+  local right="${(j: • :)parts}"
+
+  PS1="${left} ${right}
+${smiley} ${suffix} "
+  RPROMPT=""
+}
+
+precmd_functions+=build_prompt
