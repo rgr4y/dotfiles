@@ -77,45 +77,25 @@ install_vim_plug() {
 }
 
 install_packages() {
-  # Essentials — stuff you always want on any box
-  local -a PKGS=(
-    vim git zsh curl wget rsync unzip zip
-    htop btop tree jq ripgrep fzf tmux lsof
-    diff-so-fancy
-  )
-
-  # Detect package manager
-  local PM=""
-  local INSTALL=""
-  if command -v apt-get &>/dev/null; then
-    PM="apt"
-    INSTALL="apt-get install -y"
-  elif command -v yum &>/dev/null; then
-    PM="yum"
-    INSTALL="yum install -y"
-  elif command -v brew &>/dev/null; then
-    PM="brew"
-    INSTALL="brew install"
-  elif command -v pacman &>/dev/null; then
-    PM="pacman"
-    INSTALL="pacman -S --noconfirm"
-  else
-    echo "⚠ No supported package manager found, skipping packages"
+  if [[ "$OS" == "linux" ]]; then
+    # Linux packages handled by install.linux.sh (called after profile selection)
+    echo "⏳ Linux packages will be installed after profile selection"
     return
   fi
 
-  # diff-so-fancy is not in apt — handle separately
-  local install_dsf=0
-  PKGS=("${PKGS[@]/diff-so-fancy/}")
-
-  if ! command -v diff-so-fancy &>/dev/null; then
-    install_dsf=1
+  # macOS: use brew for essentials
+  if ! command -v brew &>/dev/null; then
+    echo "⚠ No Homebrew found, skipping packages"
+    return
   fi
 
-  # Filter to only missing packages
+  local -a PKGS=(
+    vim git zsh curl wget rsync unzip zip
+    htop btop tree jq ripgrep fzf tmux lsof
+  )
+
   local -a MISSING=()
   for pkg in "${PKGS[@]}"; do
-    [[ -z "$pkg" ]] && continue
     local bin="$pkg"
     case "$pkg" in
       ripgrep) bin="rg" ;;
@@ -127,26 +107,14 @@ install_packages() {
 
   if [[ ${#MISSING[@]} -eq 0 ]]; then
     echo "✓ All essential packages already installed"
-    return
-  fi
-
-  echo "Installing ${#MISSING[@]} packages: ${MISSING[*]}"
-
-  if [[ "$PM" == "brew" ]]; then
-    $INSTALL "${MISSING[@]}"
-  elif [[ $HAS_SUDO -eq 1 ]]; then
-    [[ "$PM" == "apt" ]] && sudo apt-get update -qq
-    sudo $INSTALL "${MISSING[@]}" 2>/dev/null || true
   else
-    echo "⚠ No sudo — skipping system packages. Install manually:"
-    echo "  $INSTALL ${MISSING[*]}"
-    return
+    echo "Installing ${#MISSING[@]} packages: ${MISSING[*]}"
+    brew install "${MISSING[@]}"
+    echo "✓ Packages installed"
   fi
 
-  echo "✓ Packages installed"
-
-  # diff-so-fancy: standalone perl script, no package manager needed
-  if [[ $install_dsf -eq 1 ]]; then
+  # diff-so-fancy: standalone perl script
+  if ! command -v diff-so-fancy &>/dev/null; then
     echo "Installing diff-so-fancy..."
     mkdir -p "$HOME/.local/bin"
     curl -sL https://raw.githubusercontent.com/so-fancy/diff-so-fancy/master/third_party/build_fatpack/diff-so-fancy \
@@ -311,6 +279,19 @@ select_modules() {
 select_profile
 select_modules
 
+# ──────────────────────────────────────────────
+# Linux packages (now that we know the profile)
+# ──────────────────────────────────────────────
+if [[ "$OS" == "linux" ]]; then
+  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  if [[ -f "$SCRIPT_DIR/install.linux.sh" ]]; then
+    bash "$SCRIPT_DIR/install.linux.sh" "$PROFILE"
+  else
+    # Running from curl pipe — fetch it
+    bash <(curl -sL https://raw.githubusercontent.com/rgr4y/dotfiles/main/install.linux.sh) "$PROFILE"
+  fi
+fi
+
 echo "${BOLD}Profile:${RESET} $PROFILE"
 echo "${BOLD}Modules:${RESET}"
 for mod in nvm pyenv bun php copilot tmux fzf vscode; do
@@ -365,6 +346,15 @@ write_chezmoidata
 
 echo "Applying dotfiles..."
 chezmoi apply -v
+
+# ──────────────────────────────────────────────
+# 6. Vim plugins
+# ──────────────────────────────────────────────
+if command -v vim &>/dev/null; then
+  echo "Installing vim plugins..."
+  vim +PlugInstall +qall
+  echo "✓ Vim plugins installed"
+fi
 
 echo
 echo "${GREEN}${BOLD}Done!${RESET} Log out and back in, or: exec zsh"
