@@ -206,25 +206,24 @@ fi
 # ──────────────────────────────────────────────
 # Prompt
 # ──────────────────────────────────────────────
-{{- if eq .chezmoi.os "darwin" }}
-[[ -f "$HOME/.zshrc.prompt.zsh" ]] && source "$HOME/.zshrc.prompt.zsh"
-{{- else }}
-# Emoji prompt for Linux (agnoster theme loaded above handles the heavy lifting)
+# Agnoster is loaded above via zi. Append a second line with emoji prompt.
 setopt prompt_subst
-build_prompt() {
-  local st=$?
+__emoji_prompt_line() {
   local smiley
   if [[ $EUID -eq 0 ]]; then
     smiley='😈 # '
-  elif [[ $st -ne 0 ]]; then
+  elif [[ $__zp_last_status -ne 0 ]]; then
     smiley='😡 > '
   else
     smiley='😀 > '
   fi
-  PROMPT="${smiley}"
+  PROMPT+=$'\n'"${smiley}"
 }
-precmd_functions+=build_prompt
-{{- end }}
+# Capture exit status early (before other precmd hooks clobber $?)
+__emoji_capture_status() { __zp_last_status=$?; }
+# Prepend capture, append emoji (so it runs after agnoster sets PROMPT)
+precmd_functions=(__emoji_capture_status $precmd_functions)
+precmd_functions+=(__emoji_prompt_line)
 
 # Neofetch banner
 [[ -f "$HOME/.neofetch" ]] && cat "$HOME/.neofetch"
