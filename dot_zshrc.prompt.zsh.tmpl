@@ -91,6 +91,21 @@ mode_tag() {
 zle-keymap-select() { zle reset-prompt }
 zle -N zle-keymap-select
 
+# Gradient hostname (245→250→245 bounce) — computed once
+__zp_gradient_host() {
+  local -a ramp=(245 246 247 248 249 250 249 248 247 246)
+  local len=${#ramp[@]}
+  local host="$__ZP_HOST"
+  local out="" i
+  for (( i=0; i < ${#host}; i++ )); do
+    out+="%F{${ramp[$(( i % len + 1 ))]}}"
+    out+="${host:$i:1}"
+  done
+  out+="%f"
+  print -n -- "$out"
+}
+typeset -g __ZP_GRAD_HOST="$(__zp_gradient_host)"
+
 # Short pwd
 short_pwd() { print -P "%~"; }
 
@@ -106,7 +121,7 @@ build_prompt() {
     smiley='😀'; suffix='>'; cwd_color=$_c_cwd
   fi
 
-  local left="${_c_host}${__ZP_HOST} ${cwd_color}$(short_pwd)${_n}"
+  local left="${__ZP_GRAD_HOST} ${cwd_color}$(short_pwd)${_n}"
   local git="$(git_segment)"
   [[ -n $git ]] && left+=" ${git}"
 
