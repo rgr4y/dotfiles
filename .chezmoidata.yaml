@@ -8,3 +8,4 @@ modules:
   tmux: false
   fzf: false
   vscode: false
+  ollama_predict: false

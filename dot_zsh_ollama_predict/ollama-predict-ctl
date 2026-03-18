@@ -1,0 +1,110 @@
+#!/usr/bin/env bash
+# ollama-predict-ctl — manage the ollama-predict sidecar daemon
+set -euo pipefail
+
+DATA_DIR="${OLLAMA_PREDICT_DATA:-$HOME/.local/share/ollama-predict}"
+PIDFILE="$DATA_DIR/sidecar.pid"
+SOCK="${OLLAMA_PREDICT_SOCK:-/tmp/ollama-predict-$(id -u).sock}"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+usage() {
+    cat <<'EOF'
+Usage: ollama-predict-ctl <command>
+
+Commands:
+  start     Start the sidecar daemon
+  stop      Stop the sidecar daemon
+  restart   Restart the sidecar daemon
+  status    Show sidecar status
+  health    Query sidecar health endpoint
+  logs      Show recent sidecar activity
+  config    Show current configuration
+EOF
+}
+
+is_running() {
+    [[ -f "$PIDFILE" ]] && kill -0 "$(<"$PIDFILE")" 2>/dev/null
+}
+
+cmd_start() {
+    if is_running; then
+        echo "Sidecar already running (pid=$(<"$PIDFILE"))"
+        return 0
+    fi
+    echo "Starting sidecar..."
+    python3 "$SCRIPT_DIR/sidecar.py" &
+    disown
+    sleep 0.5
+    if is_running; then
+        echo "Started (pid=$(<"$PIDFILE"))"
+    else
+        echo "Failed to start" >&2
+        return 1
+    fi
+}
+
+cmd_stop() {
+    if ! is_running; then
+        echo "Sidecar not running"
+        return 0
+    fi
+    local pid=$(<"$PIDFILE")
+    echo "Stopping sidecar (pid=$pid)..."
+    kill "$pid" 2>/dev/null
+    sleep 0.3
+    if kill -0 "$pid" 2>/dev/null; then
+        kill -9 "$pid" 2>/dev/null
+    fi
+    rm -f "$PIDFILE" "$SOCK"
+    echo "Stopped"
+}
+
+cmd_status() {
+    if is_running; then
+        echo "Running (pid=$(<"$PIDFILE"), sock=$SOCK)"
+    else
+        echo "Not running"
+        return 1
+    fi
+}
+
+cmd_health() {
+    if ! is_running; then
+        echo "Sidecar not running" >&2
+        return 1
+    fi
+    local resp
+    if command -v socat &>/dev/null; then
+        resp=$(echo '{"action":"health"}' | socat - UNIX-CONNECT:"$SOCK" 2>/dev/null)
+    else
+        resp=$(python3 -c "
+import socket, json
+s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+s.connect('$SOCK')
+s.sendall(b'{\"action\":\"health\"}\n')
+data = s.recv(4096)
+s.close()
+print(data.decode().strip())
+")
+    fi
+    echo "$resp" | python3 -m json.tool 2>/dev/null || echo "$resp"
+}
+
+cmd_config() {
+    echo "Model:   ${OLLAMA_PREDICT_MODEL:-qwen3:0.6b}"
+    echo "URL:     ${OLLAMA_PREDICT_URL:-http://127.0.0.1:11434}"
+    echo "Socket:  $SOCK"
+    echo "Data:    $DATA_DIR"
+    echo "Timeout: ${OLLAMA_PREDICT_TIMEOUT:-0.3}s"
+    echo "Max:     ${OLLAMA_PREDICT_MAX:-5} suggestions"
+}
+
+case "${1:-}" in
+    start)   cmd_start ;;
+    stop)    cmd_stop ;;
+    restart) cmd_stop; cmd_start ;;
+    status)  cmd_status ;;
+    health)  cmd_health ;;
+    config)  cmd_config ;;
+    *)       usage ;;
+esac

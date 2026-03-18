@@ -196,6 +196,14 @@ elif [[ -f /usr/share/doc/fzf/examples/key-bindings.zsh ]]; then
 fi
 {{ end -}}
 
+{{ if .modules.ollama_predict -}}
+# ──────────────────────────────────────────────
+# Ollama Predict (local LLM shell predictions)
+# ──────────────────────────────────────────────
+[[ -f "$HOME/.zsh_ollama_predict/ollama-predict.plugin.zsh" ]] && \
+  source "$HOME/.zsh_ollama_predict/ollama-predict.plugin.zsh"
+{{ end -}}
+
 [[ -f "$HOME/.zshrc.prompt.zsh" ]] && source "$HOME/.zshrc.prompt.zsh"
 [[ -f "$HOME/.neofetch" ]] && cat "$HOME/.neofetch"
 [[ -f "$HOME/.zshrc.aliases.zsh" ]] && source "$HOME/.zshrc.aliases.zsh"

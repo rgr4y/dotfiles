@@ -22,3 +22,8 @@ README.md
 .tmux.conf
 .tmux/**
 {{ end }}
+
+# Ignore ollama predict plugin if module not selected
+{{ if not .modules.ollama_predict }}
+.zsh_ollama_predict/**
+{{ end }}
