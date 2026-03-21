@@ -121,7 +121,10 @@ build_prompt() {
     smiley='😀'; suffix='>'; cwd_color=$_c_cwd
   fi
 
-  local left="${__ZP_GRAD_HOST} ${cwd_color}$(short_pwd)${_n}"
+  local host_part="$__ZP_GRAD_HOST"
+  [[ $USER != "rob" ]] && host_part="%F{cyan}${USER}@%f${host_part}"
+
+  local left="${host_part} ${cwd_color}$(short_pwd)${_n}"
   local git="$(git_segment)"
   [[ -n $git ]] && left+=" ${git}"
 
