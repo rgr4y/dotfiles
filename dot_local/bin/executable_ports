@@ -2,6 +2,7 @@
 use strict;
 use warnings;
 use Config;
+use Getopt::Std;
 
 sub parse_ss_udp_table_linux {
     my %seen;
@@ -45,13 +46,25 @@ sub parse_listen_table_macos {
     my %seen;
     my @rows;
 
+    # Pre-fetch full process names from ps to avoid lsof's 15-char truncation
+    my %pid_name;
+    open(my $ps, "-|", "ps -ax -o pid=,comm=") or die "Failed to run ps: $!";
+    while (<$ps>) {
+        if (/^\s*(\d+)\s+(.+)/) {
+            my ($pid, $comm) = ($1, $2);
+            $comm =~ s{.*/}{};   # basename only
+            $pid_name{$pid} = $comm;
+        }
+    }
+    close $ps;
+
     open(my $fh, "-|", "lsof -P -n 2>/dev/null | grep LISTEN") or die "Failed to run lsof: $!";
 
     while (<$fh>) {
         my @fields = split;
         next unless @fields >= 9;
 
-        my ($proc, $pid, $addrport) = ($fields[0], $fields[1], $fields[-2]);
+        my ($pid, $addrport) = ($fields[1], $fields[-2]);
         my ($addr, $port);
 
         if ($addrport =~ /^\[(.+)\]:(\d+)$/) {
@@ -68,6 +81,7 @@ sub parse_listen_table_macos {
         my $key = "tcp\t$port\t$addr";
         next if $seen{$key}++;
 
+        my $proc = $pid_name{$pid} // $fields[0];
         push @rows, [$port + 0, "tcp", $port, $addr, "$pid/$proc"];
     }
 
@@ -106,8 +120,33 @@ sub print_ascii_table {
     print "$line\n";
 }
 
+sub kill_port {
+    my ($port, @rows) = @_;
+    my @matches = grep { $_->[0] == $port } @rows;
+    if (!@matches) {
+        die "No process found listening on port $port\n";
+    }
+    for my $r (@matches) {
+        my $pidproc = $r->[4];
+        if ($pidproc eq '-') {
+            warn "Port $port: could not determine PID (try running with sudo)\n";
+            next;
+        }
+        my ($pid) = $pidproc =~ /^(\d+)/;
+        unless ($pid) {
+            warn "Port $port: could not parse PID from '$pidproc'\n";
+            next;
+        }
+        print "Killing PID $pid ($pidproc) on port $port...\n";
+        kill('TERM', $pid) or warn "Failed to kill PID $pid: $!\n";
+    }
+}
+
 # Main dispatcher
 sub main {
+    my %opts;
+    getopts('k:', \%opts);
+
     my $osname = $^O;
     my @rows;
 
@@ -119,7 +158,13 @@ sub main {
         die "Unsupported OS: $osname\n";
     }
 
-    print_ascii_table(@rows);
+    if (defined $opts{k}) {
+        my $port = $opts{k};
+        die "Invalid port: $port\n" unless $port =~ /^\d+$/ && $port > 0 && $port <= 65535;
+        kill_port($port + 0, @rows);
+    } else {
+        print_ascii_table(@rows);
+    }
 }
 
 main() if !caller();
