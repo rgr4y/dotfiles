@@ -46,14 +46,29 @@ sub parse_listen_table_macos {
     my %seen;
     my @rows;
 
-    # Pre-fetch full process names from ps to avoid lsof's 15-char truncation
+    # Pre-fetch full process names from ps — use args= to get full names and
+    # script names for interpreters (node, bun, python, etc.)
     my %pid_name;
-    open(my $ps, "-|", "ps -ax -o pid=,comm=") or die "Failed to run ps: $!";
+    my %interpreters = map { $_ => 1 } qw(node bun python python3 ruby perl deno tsx ts-node);
+    open(my $ps, "-|", "ps -ax -o pid=,args=") or die "Failed to run ps: $!";
     while (<$ps>) {
         if (/^\s*(\d+)\s+(.+)/) {
-            my ($pid, $comm) = ($1, $2);
-            $comm =~ s{.*/}{};   # basename only
-            $pid_name{$pid} = $comm;
+            my ($pid, $args) = ($1, $2);
+            my @parts = split /\s+/, $args;
+            my $exe = $parts[0];
+            $exe =~ s{.*/}{};  # basename of executable
+
+            my $name;
+            if ($interpreters{$exe} && @parts > 1) {
+                # Find first non-flag argument as the script
+                my ($script) = grep { !/^-/ } @parts[1..$#parts];
+                if ($script) {
+                    $script =~ s{.*/}{};  # basename
+                    $name = "$exe($script)";
+                }
+            }
+            $name //= $exe;
+            $pid_name{$pid} = $name;
         }
     }
     close $ps;
