@@ -54,20 +54,28 @@ sub parse_listen_table_macos {
     while (<$ps>) {
         if (/^\s*(\d+)\s+(.+)/) {
             my ($pid, $args) = ($1, $2);
-            my @parts = split /\s+/, $args;
-            my $exe = $parts[0];
-            $exe =~ s{.*/}{};  # basename of executable
 
             my $name;
-            if ($interpreters{$exe} && @parts > 1) {
-                # Find first non-flag argument as the script
-                my ($script) = grep { !/^-/ } @parts[1..$#parts];
-                if ($script) {
-                    $script =~ s{.*/}{};  # basename
-                    $name = "$exe($script)";
+
+            # Extract .app bundle name if present (handles spaces in paths)
+            if ($args =~ m{/([^/]+)\.app/}) {
+                $name = $1;
+            } else {
+                # Split on whitespace to get exe and args
+                my @parts = split /\s+/, $args;
+                my $exe = $parts[0];
+                $exe =~ s{.*/}{};  # basename of executable
+
+                if ($interpreters{$exe} && @parts > 1) {
+                    my ($script) = grep { !/^-/ } @parts[1..$#parts];
+                    if ($script) {
+                        $script =~ s{.*/}{};
+                        $name = "$exe($script)";
+                    }
                 }
+                $name //= $exe;
             }
-            $name //= $exe;
+
             $pid_name{$pid} = $name;
         }
     }
