@@ -5,6 +5,6 @@ modules:
   bun: false
   php: false
   copilot: false
-  tmux: false
+  tmux: true
   fzf: false
   vscode: false
