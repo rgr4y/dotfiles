@@ -87,7 +87,7 @@ install_packages() {
 
   local -a PKGS=(
     vim git zsh curl wget rsync unzip zip
-    htop btop tree jq ripgrep fzf tmux lsof
+    htop btop tree jq ripgrep fzf tmux sesh lsof
   )
 
   local -a MISSING=()
