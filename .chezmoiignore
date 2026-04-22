@@ -8,6 +8,7 @@
 .zsh_history
 .bash_history
 install.sh
+install.linux.sh
 docs/**
 README.md
 .gitignore

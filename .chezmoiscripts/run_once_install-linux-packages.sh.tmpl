@@ -1,0 +1,87 @@
+{{- if eq .chezmoi.os "linux" -}}
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Require root or working sudo
+if [[ "$(id -u)" -ne 0 ]]; then
+  if ! command -v sudo &>/dev/null || ! sudo -n true 2>/dev/null; then
+    echo "⚠ No root/sudo access — skipping Linux package install"
+    exit 0
+  fi
+  SUDO="sudo"
+else
+  SUDO=""
+fi
+
+# Detect package manager
+PM=""
+INSTALL=""
+if command -v apt-get &>/dev/null; then
+  PM="apt"
+  INSTALL="$SUDO apt-get install -y"
+elif command -v yum &>/dev/null; then
+  PM="yum"
+  INSTALL="$SUDO yum install -y"
+elif command -v pacman &>/dev/null; then
+  PM="pacman"
+  INSTALL="$SUDO pacman -S --noconfirm"
+else
+  echo "⚠ No supported package manager (apt/yum/pacman) found"
+  exit 0
+fi
+
+# Install zsh first
+if ! command -v zsh &>/dev/null; then
+  echo "Installing zsh..."
+  [[ "$PM" == "apt" ]] && $SUDO apt-get update -qq
+  $INSTALL zsh
+  echo "✓ zsh installed"
+fi
+
+# Base packages (always)
+BASE_PKGS=(
+  git curl htop ncat netcat-openbsd aria2
+  command-not-found fzf ripgrep tcpdump
+  procps lsof wget pv file unzip
+)
+
+# Full packages (only with "full" profile)
+FULL_PKGS=(
+  iftop iotop btop tree screen tmux rsync rclone
+  dialog util-linux toilet figlet dnsutils
+  iputils-ping iproute2 net-tools pigz nmap less
+  jq m4 iperf3 gh
+)
+
+PKGS=("${BASE_PKGS[@]}")
+{{ if eq .profile "full" -}}
+PKGS+=("${FULL_PKGS[@]}")
+{{ end -}}
+
+# Deduplicate
+declare -A SEEN
+UNIQUE=()
+for pkg in "${PKGS[@]}"; do
+  if [[ -z "${SEEN[$pkg]:-}" ]]; then
+    SEEN[$pkg]=1
+    UNIQUE+=("$pkg")
+  fi
+done
+
+echo "Installing ${#UNIQUE[@]} packages..."
+[[ "$PM" == "apt" ]] && $SUDO apt-get update -qq
+
+for pkg in "${UNIQUE[@]}"; do
+  echo "  → $pkg"
+done
+
+$INSTALL "${UNIQUE[@]}" 2>/dev/null || {
+  echo "Bulk install had errors, falling back to one-by-one..."
+  for pkg in "${UNIQUE[@]}"; do
+    echo "  → $pkg"
+    $INSTALL "$pkg" 2>/dev/null || echo "    ⚠ $pkg failed (may not exist in this distro)"
+  done
+}
+
+echo "✓ Linux packages installed"
+{{ end -}}

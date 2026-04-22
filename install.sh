@@ -77,13 +77,9 @@ install_vim_plug() {
 }
 
 install_packages() {
-  if [[ "$OS" == "linux" ]]; then
-    # Linux packages handled by install.linux.sh (called after profile selection)
-    echo "⏳ Linux packages will be installed after profile selection"
-    return
-  fi
+  # Linux packages handled by chezmoi run_once script
+  [[ "$OS" != "darwin" ]] && return
 
-  # macOS: use brew for essentials
   if ! command -v brew &>/dev/null; then
     echo "⚠ No Homebrew found, skipping packages"
     return
@@ -279,18 +275,6 @@ select_modules() {
 select_profile
 select_modules
 
-# ──────────────────────────────────────────────
-# Linux packages (now that we know the profile)
-# ──────────────────────────────────────────────
-if [[ "$OS" == "linux" ]]; then
-  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-  if [[ -f "$SCRIPT_DIR/install.linux.sh" ]]; then
-    bash "$SCRIPT_DIR/install.linux.sh" "$PROFILE"
-  else
-    # Running from curl pipe — fetch it
-    bash <(curl -sL https://raw.githubusercontent.com/rgr4y/dotfiles/main/install.linux.sh) "$PROFILE"
-  fi
-fi
 
 echo "${BOLD}Profile:${RESET} $PROFILE"
 echo "${BOLD}Modules:${RESET}"
