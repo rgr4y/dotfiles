@@ -18,7 +18,7 @@ PM=""
 INSTALL=""
 if command -v apt-get &>/dev/null; then
   PM="apt"
-  INSTALL="$SUDO apt-get install -y"
+  INSTALL="$SUDO apt-get -o APT::Update::Post-Invoke-Success='' install -y"
 elif command -v yum &>/dev/null; then
   PM="yum"
   INSTALL="$SUDO yum install -y"
@@ -33,7 +33,7 @@ fi
 # Install zsh first
 if ! command -v zsh &>/dev/null; then
   echo "Installing zsh..."
-  [[ "$PM" == "apt" ]] && $SUDO apt-get update -qq
+  [[ "$PM" == "apt" ]] && $SUDO apt-get -o APT::Update::Post-Invoke-Success='' update -qq
   $INSTALL zsh
   echo "✓ zsh installed"
 fi
@@ -69,7 +69,7 @@ for pkg in "${PKGS[@]}"; do
 done
 
 echo "Installing ${#UNIQUE[@]} packages..."
-[[ "$PM" == "apt" ]] && $SUDO apt-get update -qq
+[[ "$PM" == "apt" ]] && $SUDO apt-get -o APT::Update::Post-Invoke-Success='' update -qq
 
 for pkg in "${UNIQUE[@]}"; do
   echo "  → $pkg"
