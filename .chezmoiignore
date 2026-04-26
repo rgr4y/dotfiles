@@ -23,3 +23,9 @@ README.md
 .tmux.conf
 .tmux/**
 {{ end }}
+
+{{ if eq .chezmoi.os "darwin" }}
+.local/bin/dysk-linux
+{{ else }}
+.local/bin/dysk-darwin
+{{ end }}

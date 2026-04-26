@@ -1,0 +1,5 @@
+{{ if eq .chezmoi.os "darwin" -}}
+{{ .chezmoi.homeDir }}/.local/bin/dysk-darwin
+{{- else -}}
+{{ .chezmoi.homeDir }}/.local/bin/dysk-linux
+{{- end }}
