@@ -26,6 +26,11 @@ README.md
 
 {{ if eq .chezmoi.os "darwin" }}
 .local/bin/dysk-linux
+.local/bin/dysk-linux.aarch64
+{{ else if eq .chezmoi.arch "arm64" }}
+.local/bin/dysk-darwin
+.local/bin/dysk-linux
 {{ else }}
 .local/bin/dysk-darwin
+.local/bin/dysk-linux.aarch64
 {{ end }}
