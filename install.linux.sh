@@ -58,7 +58,7 @@ fi
 BASE_PKGS=(
   git curl htop ncat netcat-openbsd aria2
   command-not-found fzf ripgrep tcpdump
-  procps lsof wget pv file unzip
+  procps lsof wget pv file unzip eza
 )
 
 # ──────────────────────────────────────────────

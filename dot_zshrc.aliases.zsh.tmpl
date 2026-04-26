@@ -28,9 +28,17 @@ alias more='less -FX'
 alias tmls='tmux list-sessions'
 alias ehost='sudo vim /etc/hosts'
 alias logs='lnav'
-alias l='ls -CF'
-alias la='ls -A'
-alias ll='ls -alh'
+if command -v eza &>/dev/null; then
+  alias l='eza --classify --icons --group-directories-first'
+  alias la='eza -a --icons --group-directories-first'
+  alias ll='eza -alh --git --header --icons --group-directories-first'
+  alias ls='eza --icons --group-directories-first'
+  alias tree='eza --tree --icons --group-directories-first'
+else
+  alias l='ls -CF'
+  alias la='ls -A'
+  alias ll='ls -alh'
+fi
 alias ..='cd ..'
 alias ...='cd ../..'
 alias ....='cd ../../..'
@@ -78,6 +86,53 @@ pbcat() {
 
 phpstorm() {
   open -a PhpStorm "${1:-.}"
+}
+
+kk() {
+  local last
+  last="$(fc -ln -1 2>/dev/null | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+  if [[ -z "$last" ]]; then
+    print -u2 "kk: no previous command in history"
+    return 1
+  fi
+  if [[ "$last" == kk* ]]; then
+    print -u2 "kk: last command was kk itself — nothing to correct"
+    return 1
+  fi
+
+  local sys='You are a shell command corrector for zsh on macOS. The user will give you a single shell command that may contain typos, wrong flags, bad syntax, or the wrong tool. Return ONLY the corrected command as one line of plain text, ready to paste into a terminal. No code fences, no backticks, no explanation, no prose, no leading prompt characters like $ or #. If the command is already correct, return it unchanged.'
+
+  local fixed rc stderr_file
+  stderr_file="$(mktemp -t kk-apfel.XXXXXX)"
+  if [[ -n "$KK_DEBUG" ]]; then
+    print -u2 "kk: last cmd => $last"
+    print -u2 "kk: invoking: apfel -q -s <sys> -- <last>"
+  fi
+  fixed="$(apfel -q -s "$sys" "$last" 2>"$stderr_file")"
+  rc=$?
+  if (( rc != 0 )); then
+    print -u2 "kk: apfel failed (exit $rc)"
+    print -u2 "kk: stderr:"
+    sed 's/^/  /' "$stderr_file" >&2
+    rm -f "$stderr_file"
+    return 1
+  fi
+  if [[ -n "$KK_DEBUG" ]]; then
+    print -u2 "kk: raw apfel stdout:"
+    print -u2 -r -- "  $fixed"
+    [[ -s "$stderr_file" ]] && { print -u2 "kk: apfel stderr:"; sed 's/^/  /' "$stderr_file" >&2; }
+  fi
+  rm -f "$stderr_file"
+
+  fixed="${fixed//$'\r'/}"
+  fixed="$(print -r -- "$fixed" | sed -e 's/^```[a-zA-Z]*//' -e 's/```$//' -e 's/^[[:space:]]*[$#][[:space:]]*//' -e 's/^`//' -e 's/`$//' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+
+  if [[ -z "$fixed" ]]; then
+    print -u2 "kk: empty response from apfel"
+    return 1
+  fi
+
+  print -z -- "$fixed"
 }
 {{ end -}}
 

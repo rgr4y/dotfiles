@@ -96,6 +96,13 @@ set nowrap
 
 set cursorline
 
+" Statusline (overridden by airline on full profile)
+set statusline=%#StatusFile#\ %f\ %m%r%=%#StatusInfo#\ %y\ %l:%c\ %p%%\
+hi StatusFile  ctermfg=cyan  ctermbg=235 cterm=bold guifg=#56b6c2 guibg=#282c34 gui=bold
+hi StatusInfo  ctermfg=245   ctermbg=235 cterm=NONE guifg=#5c6370 guibg=#282c34
+hi StatusLine  ctermfg=cyan  ctermbg=235 cterm=NONE guifg=#56b6c2 guibg=#282c34
+hi StatusLineNC ctermfg=240  ctermbg=235 cterm=NONE guifg=#3e4452 guibg=#282c34
+
 " File handling
 set nobackup
 set noswapfile
