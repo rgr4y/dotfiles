@@ -222,6 +222,11 @@ if [[ -n "${SSH_TTY:-}" && -z "${TMUX:-}" ]]; then
 fi
 
 if [[ "$HAS_ZSH" -eq 1 && "${_DOTFILES_CHANGED:-0}" -eq 1 ]]; then
-  echo "[ing] launching fresh zsh..."
-  exec zsh -l
+  _parent_comm="$(ps -p "$PPID" -o comm= 2>/dev/null || true)"
+  if [[ "$_parent_comm" == *zsh* ]]; then
+    echo "[ing] zsh already running — run 'source ~/.zshrc' to reload config"
+  else
+    echo "[ing] launching fresh zsh..."
+    exec zsh -l
+  fi
 fi
