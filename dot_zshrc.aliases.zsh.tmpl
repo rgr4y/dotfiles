@@ -147,7 +147,6 @@ alias unlock="sudo chattr -i"
 # ── Functions ───────────────────────────────
 # Guard ZSH-only syntax for bash compat
 if [ -n "$ZSH_VERSION" ]; then
-
   psgrep() {
     ps auxw | grep -i "\b$1\b" | grep -v grep
   }
@@ -157,8 +156,9 @@ if [ -n "$ZSH_VERSION" ]; then
     local dst="${2%/}/"
     rsync -aHAXv "$src" "$dst"
   }
-
 fi
 
 # ── The Classics ────────────────────────────
 alias goodshit='GOODSHIT="👌👀👌👀👌👀👌👀👌👀 good shit go౦ԁ sHit👌 thats ✔ some good👌👌shit right👌👌there👌👌👌 right✔there ✔✔if i do ƽaү so my self 💯 i say so 💯 thats what im talking about right there right there (chorus: ʳᶦᵍʰᵗ ᵗʰᵉʳᵉ) mMMMMᎷМ💯 👌👌 👌НO0ОଠOOOOOОଠଠOoooᵒᵒᵒᵒᵒᵒᵒᵒᵒ👌 👌👌 👌 💯 👌 👀 👀 👀 👌👌Good shit" && echo $GOODSHIT | pbcopy && echo $GOODSHIT'
+
+alias bigfiles='du -h -d 3 . | sort -rh | head -20'
