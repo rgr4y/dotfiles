@@ -214,7 +214,11 @@ else
 fi
 
 # ── Launch shell ────────────────────────────────────────────────────────────
-if [[ -n "${SSH_TTY:-}" && -z "${TMUX:-}" ]]; then
+_parent_comm="$(ps -p "$PPID" -o comm= 2>/dev/null || true)"
+_zsh_already_active=0
+[[ "$_parent_comm" == *zsh* ]] && _zsh_already_active=1
+
+if [[ -n "${SSH_TTY:-}" && -z "${TMUX:-}" && "$_zsh_already_active" -eq 0 ]]; then
   echo "[ing] bootstrap complete; disconnecting so you can reconnect..."
   sleep 1
   kill -HUP "$PPID"
@@ -222,8 +226,7 @@ if [[ -n "${SSH_TTY:-}" && -z "${TMUX:-}" ]]; then
 fi
 
 if [[ "$HAS_ZSH" -eq 1 && "${_DOTFILES_CHANGED:-0}" -eq 1 ]]; then
-  _parent_comm="$(ps -p "$PPID" -o comm= 2>/dev/null || true)"
-  if [[ "$_parent_comm" == *zsh* ]]; then
+  if [[ "$_zsh_already_active" -eq 1 ]]; then
     echo "[ing] zsh already running — run 'source ~/.zshrc' to reload config"
   else
     echo "[ing] launching fresh zsh..."
