@@ -156,6 +156,8 @@ if [ -n "$ZSH_VERSION" ]; then
     local dst="${2%/}/"
     rsync -aHAXv "$src" "$dst"
   }
+
+  alias zr='source $HOME/.zshrc'
 fi
 
 # ── The Classics ────────────────────────────
