@@ -30,6 +30,14 @@ else
   exit 0
 fi
 
+_pkg_installed() {
+  case "$PM" in
+    apt)    dpkg -s "$1" &>/dev/null ;;
+    yum)    rpm -q "$1" &>/dev/null ;;
+    pacman) pacman -Qi "$1" &>/dev/null ;;
+  esac
+}
+
 # Install zsh first
 if ! command -v zsh &>/dev/null; then
   echo "Installing zsh..."
@@ -58,26 +66,33 @@ PKGS=("${BASE_PKGS[@]}")
 PKGS+=("${FULL_PKGS[@]}")
 {{ end -}}
 
-# Deduplicate
+# Deduplicate and filter already-installed packages
 declare -A SEEN
-UNIQUE=()
+NEEDED=()
 for pkg in "${PKGS[@]}"; do
   if [[ -z "${SEEN[$pkg]:-}" ]]; then
     SEEN[$pkg]=1
-    UNIQUE+=("$pkg")
+    if ! _pkg_installed "$pkg"; then
+      NEEDED+=("$pkg")
+    fi
   fi
 done
 
-echo "Installing ${#UNIQUE[@]} packages..."
+if [[ ${#NEEDED[@]} -eq 0 ]]; then
+  echo "✓ All ${#SEEN[@]} packages already installed"
+  exit 0
+fi
+
+echo "Installing ${#NEEDED[@]} packages (${#SEEN[@]} total, $((${#SEEN[@]} - ${#NEEDED[@]})) already installed)..."
 [[ "$PM" == "apt" ]] && $SUDO apt-get -o APT::Update::Post-Invoke-Success='' update -qq
 
-for pkg in "${UNIQUE[@]}"; do
+for pkg in "${NEEDED[@]}"; do
   echo "  → $pkg"
 done
 
-$INSTALL "${UNIQUE[@]}" 2>/dev/null || {
+$INSTALL "${NEEDED[@]}" 2>/dev/null || {
   echo "Bulk install had errors, falling back to one-by-one..."
-  for pkg in "${UNIQUE[@]}"; do
+  for pkg in "${NEEDED[@]}"; do
     echo "  → $pkg"
     $INSTALL "$pkg" 2>/dev/null || echo "    ⚠ $pkg failed (may not exist in this distro)"
   done

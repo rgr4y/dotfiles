@@ -40,6 +40,14 @@ else
   exit 1
 fi
 
+_pkg_installed() {
+  case "$PM" in
+    apt)    dpkg -s "$1" &>/dev/null ;;
+    yum)    rpm -q "$1" &>/dev/null ;;
+    pacman) pacman -Qi "$1" &>/dev/null ;;
+  esac
+}
+
 # ──────────────────────────────────────────────
 # Install zsh first (needed before everything)
 # ──────────────────────────────────────────────
@@ -79,36 +87,41 @@ if [[ "$INSTALL_FULL" == "full" ]]; then
   PKGS+=("${FULL_PKGS[@]}")
 fi
 
-# Deduplicate (base and full share some entries like procps, fzf, ripgrep, etc.)
+# Deduplicate and filter already-installed packages
 declare -A SEEN
-UNIQUE=()
+NEEDED=()
 for pkg in "${PKGS[@]}"; do
   if [[ -z "${SEEN[$pkg]:-}" ]]; then
     SEEN[$pkg]=1
-    UNIQUE+=("$pkg")
+    if ! _pkg_installed "$pkg"; then
+      NEEDED+=("$pkg")
+    fi
   fi
 done
 
 # ──────────────────────────────────────────────
 # Install
 # ──────────────────────────────────────────────
-echo "Installing ${#UNIQUE[@]} packages..."
-[[ "$PM" == "apt" ]] && sudo apt-get update -qq
+if [[ ${#NEEDED[@]} -eq 0 ]]; then
+  echo "✓ All ${#SEEN[@]} packages already installed"
+else
+  echo "Installing ${#NEEDED[@]} packages (${#SEEN[@]} total, $((${#SEEN[@]} - ${#NEEDED[@]})) already installed)..."
+  [[ "$PM" == "apt" ]] && sudo apt-get update -qq
 
-for pkg in "${UNIQUE[@]}"; do
-  echo "  → $pkg"
-done
-
-$INSTALL "${UNIQUE[@]}" 2>/dev/null || {
-  # Some packages may not exist on all distros — try one-by-one
-  echo "Bulk install had errors, falling back to one-by-one..."
-  for pkg in "${UNIQUE[@]}"; do
+  for pkg in "${NEEDED[@]}"; do
     echo "  → $pkg"
-    $INSTALL "$pkg" 2>/dev/null || echo "    ⚠ $pkg failed (may not exist in this distro)"
   done
-}
 
-echo "✓ Linux packages installed"
+  $INSTALL "${NEEDED[@]}" 2>/dev/null || {
+    echo "Bulk install had errors, falling back to one-by-one..."
+    for pkg in "${NEEDED[@]}"; do
+      echo "  → $pkg"
+      $INSTALL "$pkg" 2>/dev/null || echo "    ⚠ $pkg failed (may not exist in this distro)"
+    done
+  }
+
+  echo "✓ Linux packages installed"
+fi
 
 # ──────────────────────────────────────────────
 # sesh (tmux session manager) — only if tmux installed

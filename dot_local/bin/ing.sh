@@ -171,11 +171,14 @@ data:
   profile: ${PROFILE}
 EOF
 
+_DOTFILES_CHANGED=0
 if [[ -d "$HOME/.local/share/chezmoi/.git" ]]; then
-  chezmoi update --exclude=scripts
+  _cm_out="$(chezmoi update --exclude=scripts 2>&1)" || true
+  [[ -n "$_cm_out" ]] && _DOTFILES_CHANGED=1
 else
   chezmoi init "$GITHUB_USERNAME"
   chezmoi apply --exclude=scripts
+  _DOTFILES_CHANGED=1
 fi
 echo "[ing] dotfiles deployed ✓"
 
@@ -218,7 +221,7 @@ if [[ -n "${SSH_TTY:-}" && -z "${TMUX:-}" ]]; then
   exit 0
 fi
 
-if [[ "$HAS_ZSH" -eq 1 ]]; then
+if [[ "$HAS_ZSH" -eq 1 && "${_DOTFILES_CHANGED:-0}" -eq 1 ]]; then
   echo "[ing] launching fresh zsh..."
   exec zsh -l
 fi
