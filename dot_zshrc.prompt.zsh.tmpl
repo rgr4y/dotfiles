@@ -2,8 +2,9 @@
 # Custom Prompt
 # ──────────────────────────────────────────────
 
-# Cache hostname once
+# Cache hostname + user once
 : ${__ZP_HOST:=$(hostname -s)}
+: ${__ZP_USER:=${USER:-$(whoami)}}
 
 # Colors
 local _n='%f' _dim='%F{245}'
@@ -122,7 +123,7 @@ build_prompt() {
   fi
 
   local host_part="$__ZP_GRAD_HOST"
-  [[ $USER != "rob" ]] && host_part="%F{cyan}${USER}@%f${host_part}"
+  [[ $__ZP_USER != "rob" ]] && host_part="%F{cyan}${__ZP_USER}@%f${host_part}"
 
   local left="${host_part} ${cwd_color}$(short_pwd)${_n}"
   local git="$(git_segment)"

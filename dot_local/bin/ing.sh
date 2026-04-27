@@ -136,22 +136,7 @@ else
 fi
 echo "[ing] chezmoi ✓"
 
-# ── chezmoi apply (deploys all dotfiles to $HOME) ───────────────────────────
-CHEZMOI_DATA="$HOME/.config/chezmoi/chezmoi.yaml"
-mkdir -p "$(dirname "$CHEZMOI_DATA")"
-cat > "$CHEZMOI_DATA" <<EOF
-data:
-  profile: ${PROFILE}
-EOF
-
-if [[ -d "$HOME/.local/share/chezmoi/.git" ]]; then
-  chezmoi update
-else
-  chezmoi init --apply "$GITHUB_USERNAME"
-fi
-echo "[ing] dotfiles deployed ✓"
-
-# ── Gate: zsh (soft requirement — files already deployed) ────────────────────
+# ── Gate: zsh (install early so we can exec into it) ────────────────────────
 HAS_ZSH=0
 
 if command -v zsh &>/dev/null; then
@@ -162,7 +147,6 @@ else
     HAS_ZSH=1
   else
     echo "[ing] WARNING: can't install zsh — shell customization skipped"
-    echo "[ing] dotfiles are in place; install zsh and re-run for full setup"
   fi
 fi
 
@@ -178,6 +162,22 @@ if [[ "$HAS_ZSH" -eq 1 ]]; then
     fi
   fi
 fi
+
+# ── chezmoi apply (dotfiles only — skip heavy package scripts) ──────────────
+CHEZMOI_DATA="$HOME/.config/chezmoi/chezmoi.yaml"
+mkdir -p "$(dirname "$CHEZMOI_DATA")"
+cat > "$CHEZMOI_DATA" <<EOF
+data:
+  profile: ${PROFILE}
+EOF
+
+if [[ -d "$HOME/.local/share/chezmoi/.git" ]]; then
+  chezmoi update --exclude=scripts
+else
+  chezmoi init "$GITHUB_USERNAME"
+  chezmoi apply --exclude=scripts
+fi
+echo "[ing] dotfiles deployed ✓"
 
 # ── Cleanup + banner ────────────────────────────────────────────────────────
 printf '\n'
@@ -196,9 +196,29 @@ printf '\n'
 rm -f "$HOME/.ing-bootstrap.done"
 rm -f "$HOME/.zlogin"
 
+# ── Package scripts (async if interactive, sync otherwise) ──────────────────
+_run_scripts() {
+  DEBIAN_FRONTEND=noninteractive chezmoi apply
+}
+
+if [[ -t 0 ]]; then
+  echo "[ing] installing packages in background (log: ~/.ing-install.log)..."
+  _run_scripts &>"$HOME/.ing-install.log" &
+  disown
+else
+  echo "[ing] installing packages..."
+  _run_scripts
+fi
+
+# ── Launch shell ────────────────────────────────────────────────────────────
 if [[ -n "${SSH_TTY:-}" && -z "${TMUX:-}" ]]; then
   echo "[ing] bootstrap complete; disconnecting so you can reconnect..."
   sleep 1
   kill -HUP "$PPID"
   exit 0
+fi
+
+if [[ "$HAS_ZSH" -eq 1 ]]; then
+  echo "[ing] launching fresh zsh..."
+  exec zsh -l
 fi
