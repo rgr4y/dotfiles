@@ -157,7 +157,7 @@ if [ -n "$ZSH_VERSION" ]; then
     rsync -aHAXv "$src" "$dst"
   }
 
-  alias zr='source $HOME/.zshrc'
+  alias zr='source $HOME/.zshrc; echo "Sourced $HOME/.zshrc"'
 fi
 
 # ── The Classics ────────────────────────────
