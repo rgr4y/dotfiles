@@ -16,9 +16,10 @@ fi
 # Detect package manager
 PM=""
 INSTALL=""
+export DEBIAN_FRONTEND=noninteractive
 if command -v apt-get &>/dev/null; then
   PM="apt"
-  INSTALL="$SUDO DEBIAN_FRONTEND=noninteractive apt-get -o APT::Update::Post-Invoke-Success='' install -y"
+  INSTALL="$SUDO apt-get install -y"
 elif command -v yum &>/dev/null; then
   PM="yum"
   INSTALL="$SUDO yum install -y"
@@ -41,7 +42,7 @@ _pkg_installed() {
 # Install zsh first
 if ! command -v zsh &>/dev/null; then
   echo "Installing zsh..."
-  [[ "$PM" == "apt" ]] && $SUDO apt-get -o APT::Update::Post-Invoke-Success='' update -qq
+  [[ "$PM" == "apt" ]] && $SUDO apt-get update -qq
   $INSTALL zsh
   echo "✓ zsh installed"
 fi
@@ -84,7 +85,7 @@ if [[ ${#NEEDED[@]} -eq 0 ]]; then
 fi
 
 echo "Installing ${#NEEDED[@]} packages (${#SEEN[@]} total, $((${#SEEN[@]} - ${#NEEDED[@]})) already installed)..."
-[[ "$PM" == "apt" ]] && $SUDO apt-get -o APT::Update::Post-Invoke-Success='' update -qq
+[[ "$PM" == "apt" ]] && $SUDO apt-get update -qq
 
 for pkg in "${NEEDED[@]}"; do
   echo "  → $pkg"
