@@ -31,7 +31,7 @@ PM=""
 INSTALL=""
 if command -v apt-get &>/dev/null; then
   PM="apt"
-  INSTALL="$SUDO DEBIAN_FRONTEND=noninteractive apt-get install --no-install-recommends -y"
+  INSTALL="$SUDO env DEBIAN_FRONTEND=noninteractive apt-get install --no-install-recommends -y"
 elif command -v yum &>/dev/null; then
   PM="yum"
   INSTALL="$SUDO yum install -y"
