@@ -2,12 +2,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Skip gracefully if no root/sudo access (non-interactive chezmoi context)
-if [[ "$(id -u)" -ne 0 ]]; then
-  if ! command -v sudo &>/dev/null || ! sudo -n true 2>/dev/null; then
-    echo "⚠ No root/sudo access — skipping Linux package install"
-    exit 0
-  fi
+# Sudo guard — root needs no sudo, non-root must have passwordless sudo
+# (chezmoi runs non-interactive, can't prompt)
+if [[ "$(id -u)" -eq 0 ]]; then
+  export SUDO=""
+elif command -v sudo &>/dev/null && sudo -n true 2>/dev/null; then
+  export SUDO="sudo"
+else
+  echo "⚠ Not root and no passwordless sudo — skipping Linux package install"
+  exit 0
 fi
 
 PROFILE={{ if eq .profile "full" }}"full"{{ else }}"bare"{{ end }}

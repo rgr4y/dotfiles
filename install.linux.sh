@@ -8,6 +8,10 @@ set -euo pipefail
 
 INSTALL_FULL="${1:-bare}"
 
+if [[ -n "${RUNPOD_PUBLIC_IP:-}" ]]; then
+  export COLUMNS=200
+fi
+
 # ──────────────────────────────────────────────
 # Sudo check — skip if already root
 # ──────────────────────────────────────────────
@@ -70,6 +74,7 @@ BASE_PKGS=(
   git curl htop ncat netcat-openbsd aria2
   command-not-found fzf ripgrep tcpdump
   procps lsof wget pv file unzip eza
+  vim bat
 )
 
 # ──────────────────────────────────────────────
@@ -140,7 +145,7 @@ if command -v tmux &>/dev/null && ! command -v sesh &>/dev/null; then
   if [[ -n "$SESH_ARCH" ]]; then
     SESH_URL="$(curl -s https://api.github.com/repos/joshmedeski/sesh/releases/latest \
       | grep "browser_download_url.*Linux_${SESH_ARCH}.tar.gz" \
-      | cut -d '"' -f 4)"
+      | cut -d '"' -f 4 || true)"
     if [[ -n "$SESH_URL" ]]; then
       tmp="$(mktemp -d)"
       curl -sL "$SESH_URL" -o "$tmp/sesh.tar.gz"
@@ -170,7 +175,7 @@ if ! command -v dua &>/dev/null; then
   if [[ -n "$DUA_TARGET" ]]; then
     DUA_URL="$(curl -s https://api.github.com/repos/Byron/dua-cli/releases/latest \
       | grep "browser_download_url.*${DUA_TARGET}.tar.gz" \
-      | cut -d '"' -f 4)"
+      | cut -d '"' -f 4 || true)"
     if [[ -n "$DUA_URL" ]]; then
       tmp="$(mktemp -d)"
       curl -sL "$DUA_URL" -o "$tmp/dua.tar.gz"
@@ -193,22 +198,27 @@ if ! command -v broot &>/dev/null; then
   echo "Installing broot..."
   BROOT_ARCH="$(uname -m)"
   case "$BROOT_ARCH" in
-    x86_64)  BROOT_TARGET="x86_64-linux" ;;
-    aarch64) BROOT_TARGET="aarch64-linux" ;;
+    x86_64)  BROOT_TARGET="x86_64-unknown-linux-musl" ;;
+    aarch64) BROOT_TARGET="aarch64-unknown-linux-musl" ;;
     *)       echo "  ⚠ broot: unsupported arch $BROOT_ARCH"; BROOT_TARGET="" ;;
   esac
   if [[ -n "$BROOT_TARGET" ]]; then
     BROOT_URL="$(curl -s https://api.github.com/repos/Canop/broot/releases/latest \
-      | grep "browser_download_url.*${BROOT_TARGET}\b" \
-      | grep -v ".zip" \
+      | grep "browser_download_url.*\.zip" \
       | head -1 \
-      | cut -d '"' -f 4)"
+      | cut -d '"' -f 4 || true)"
     if [[ -n "$BROOT_URL" ]]; then
       tmp="$(mktemp -d)"
-      curl -sL "$BROOT_URL" -o "$tmp/broot"
-      $SUDO install -m 755 "$tmp/broot" /usr/local/bin/broot
+      curl -sL "$BROOT_URL" -o "$tmp/broot.zip"
+      (cd "$tmp" && unzip -qo broot.zip)
+      BROOT_BIN="$(find "$tmp" -name "broot" -path "*${BROOT_TARGET}*" -type f 2>/dev/null | head -1)"
+      if [[ -n "$BROOT_BIN" ]]; then
+        $SUDO install -m 755 "$BROOT_BIN" /usr/local/bin/broot
+        echo "✓ broot installed"
+      else
+        echo "  ⚠ broot: no binary found for $BROOT_TARGET in zip"
+      fi
       rm -rf "$tmp"
-      echo "✓ broot installed"
     else
       echo "  ⚠ broot: could not find release URL"
     fi
