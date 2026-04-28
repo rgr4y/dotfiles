@@ -2,102 +2,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Require root or working sudo
+# Skip gracefully if no sudo access (non-interactive chezmoi context)
 if [[ "$(id -u)" -ne 0 ]]; then
   if ! command -v sudo &>/dev/null || ! sudo -n true 2>/dev/null; then
     echo "⚠ No root/sudo access — skipping Linux package install"
     exit 0
   fi
-  SUDO="sudo"
-else
-  SUDO=""
 fi
 
-# Detect package manager
-PM=""
-INSTALL=""
-export DEBIAN_FRONTEND=noninteractive
-if command -v apt-get &>/dev/null; then
-  PM="apt"
-  INSTALL="$SUDO apt-get install -y"
-elif command -v yum &>/dev/null; then
-  PM="yum"
-  INSTALL="$SUDO yum install -y"
-elif command -v pacman &>/dev/null; then
-  PM="pacman"
-  INSTALL="$SUDO pacman -S --noconfirm"
-else
-  echo "⚠ No supported package manager (apt/yum/pacman) found"
-  exit 0
-fi
-
-_pkg_installed() {
-  case "$PM" in
-    apt)    dpkg -s "$1" &>/dev/null ;;
-    yum)    rpm -q "$1" &>/dev/null ;;
-    pacman) pacman -Qi "$1" &>/dev/null ;;
-  esac
-}
-
-# Install zsh first
-if ! command -v zsh &>/dev/null; then
-  echo "Installing zsh..."
-  [[ "$PM" == "apt" ]] && $SUDO apt-get update -qq
-  $INSTALL zsh
-  echo "✓ zsh installed"
-fi
-
-# Base packages (always)
-BASE_PKGS=(
-  git curl htop ncat netcat-openbsd aria2
-  command-not-found fzf ripgrep tcpdump
-  procps lsof wget pv file unzip
-)
-
-# Full packages (only with "full" profile)
-FULL_PKGS=(
-  iftop iotop btop tree screen tmux rsync rclone
-  dialog util-linux toilet figlet dnsutils
-  iputils-ping iproute2 net-tools pigz nmap less
-  jq m4 iperf3 gh
-)
-
-PKGS=("${BASE_PKGS[@]}")
-{{ if eq .profile "full" -}}
-PKGS+=("${FULL_PKGS[@]}")
-{{ end -}}
-
-# Deduplicate and filter already-installed packages
-declare -A SEEN
-NEEDED=()
-for pkg in "${PKGS[@]}"; do
-  if [[ -z "${SEEN[$pkg]:-}" ]]; then
-    SEEN[$pkg]=1
-    if ! _pkg_installed "$pkg"; then
-      NEEDED+=("$pkg")
-    fi
-  fi
-done
-
-if [[ ${#NEEDED[@]} -eq 0 ]]; then
-  echo "✓ All ${#SEEN[@]} packages already installed"
-  exit 0
-fi
-
-echo "Installing ${#NEEDED[@]} packages (${#SEEN[@]} total, $((${#SEEN[@]} - ${#NEEDED[@]})) already installed)..."
-[[ "$PM" == "apt" ]] && $SUDO apt-get update -qq
-
-for pkg in "${NEEDED[@]}"; do
-  echo "  → $pkg"
-done
-
-$INSTALL "${NEEDED[@]}" 2>/dev/null || {
-  echo "Bulk install had errors, falling back to one-by-one..."
-  for pkg in "${NEEDED[@]}"; do
-    echo "  → $pkg"
-    $INSTALL "$pkg" 2>/dev/null || echo "    ⚠ $pkg failed (may not exist in this distro)"
-  done
-}
-
-echo "✓ Linux packages installed"
+PROFILE={{ if eq .profile "full" }}"full"{{ else }}"bare"{{ end }}
+exec "{{ .chezmoi.sourceDir }}/install.linux.sh" "$PROFILE"
 {{ end -}}

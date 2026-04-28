@@ -152,3 +152,64 @@ if command -v tmux &>/dev/null && ! command -v sesh &>/dev/null; then
 elif command -v sesh &>/dev/null; then
   echo "✓ sesh already installed"
 fi
+
+# ──────────────────────────────────────────────
+# dua-cli (disk usage analyzer)
+# ──────────────────────────────────────────────
+if ! command -v dua &>/dev/null; then
+  echo "Installing dua-cli..."
+  DUA_ARCH="$(uname -m)"
+  case "$DUA_ARCH" in
+    x86_64)  DUA_TARGET="x86_64-unknown-linux-musl" ;;
+    aarch64) DUA_TARGET="aarch64-unknown-linux-musl" ;;
+    *)       echo "  ⚠ dua-cli: unsupported arch $DUA_ARCH"; DUA_TARGET="" ;;
+  esac
+  if [[ -n "$DUA_TARGET" ]]; then
+    DUA_URL="$(curl -s https://api.github.com/repos/Byron/dua-cli/releases/latest \
+      | grep "browser_download_url.*${DUA_TARGET}.tar.gz" \
+      | cut -d '"' -f 4)"
+    if [[ -n "$DUA_URL" ]]; then
+      tmp="$(mktemp -d)"
+      curl -sL "$DUA_URL" -o "$tmp/dua.tar.gz"
+      tar -xzf "$tmp/dua.tar.gz" -C "$tmp"
+      sudo install -m 755 "$tmp"/dua-*/dua /usr/local/bin/dua
+      rm -rf "$tmp"
+      echo "✓ dua-cli installed"
+    else
+      echo "  ⚠ dua-cli: could not find release URL"
+    fi
+  fi
+elif command -v dua &>/dev/null; then
+  echo "✓ dua-cli already installed"
+fi
+
+# ──────────────────────────────────────────────
+# broot (file navigator/manager)
+# ──────────────────────────────────────────────
+if ! command -v broot &>/dev/null; then
+  echo "Installing broot..."
+  BROOT_ARCH="$(uname -m)"
+  case "$BROOT_ARCH" in
+    x86_64)  BROOT_TARGET="x86_64-linux" ;;
+    aarch64) BROOT_TARGET="aarch64-linux" ;;
+    *)       echo "  ⚠ broot: unsupported arch $BROOT_ARCH"; BROOT_TARGET="" ;;
+  esac
+  if [[ -n "$BROOT_TARGET" ]]; then
+    BROOT_URL="$(curl -s https://api.github.com/repos/Canop/broot/releases/latest \
+      | grep "browser_download_url.*${BROOT_TARGET}\b" \
+      | grep -v ".zip" \
+      | head -1 \
+      | cut -d '"' -f 4)"
+    if [[ -n "$BROOT_URL" ]]; then
+      tmp="$(mktemp -d)"
+      curl -sL "$BROOT_URL" -o "$tmp/broot"
+      sudo install -m 755 "$tmp/broot" /usr/local/bin/broot
+      rm -rf "$tmp"
+      echo "✓ broot installed"
+    else
+      echo "  ⚠ broot: could not find release URL"
+    fi
+  fi
+elif command -v broot &>/dev/null; then
+  echo "✓ broot already installed"
+fi
