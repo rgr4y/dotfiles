@@ -9,16 +9,19 @@ set -euo pipefail
 INSTALL_FULL="${1:-bare}"
 
 # ──────────────────────────────────────────────
-# Sudo check
+# Sudo check — skip if already root
 # ──────────────────────────────────────────────
-if ! command -v sudo &>/dev/null; then
-  echo "⚠ sudo not found — can't install system packages"
+if [[ "$(id -u)" -eq 0 ]]; then
+  SUDO=""
+elif command -v sudo &>/dev/null; then
+  if ! sudo -n true 2>/dev/null; then
+    echo "Need sudo to install packages..."
+    sudo -v || { echo "⚠ Failed to get sudo — skipping packages"; exit 1; }
+  fi
+  SUDO="sudo"
+else
+  echo "⚠ sudo not found and not root — can't install system packages"
   exit 1
-fi
-
-if ! sudo -n true 2>/dev/null; then
-  echo "Need sudo to install packages..."
-  sudo -v || { echo "⚠ Failed to get sudo — skipping packages"; exit 1; }
 fi
 
 # ──────────────────────────────────────────────
@@ -28,13 +31,13 @@ PM=""
 INSTALL=""
 if command -v apt-get &>/dev/null; then
   PM="apt"
-  INSTALL="sudo DEBIAN_FRONTEND=noninteractive apt-get install --no-install-recommends -y"
+  INSTALL="$SUDO DEBIAN_FRONTEND=noninteractive apt-get install --no-install-recommends -y"
 elif command -v yum &>/dev/null; then
   PM="yum"
-  INSTALL="sudo yum install -y"
+  INSTALL="$SUDO yum install -y"
 elif command -v pacman &>/dev/null; then
   PM="pacman"
-  INSTALL="sudo pacman -S --noconfirm"
+  INSTALL="$SUDO pacman -S --noconfirm"
 else
   echo "⚠ No supported package manager (apt/yum/pacman) found"
   exit 1
@@ -53,7 +56,7 @@ _pkg_installed() {
 # ──────────────────────────────────────────────
 if ! command -v zsh &>/dev/null; then
   echo "Installing zsh..."
-  [[ "$PM" == "apt" ]] && sudo apt-get update -qq
+  [[ "$PM" == "apt" ]] && $SUDO apt-get update -qq
   $INSTALL zsh
   echo "✓ zsh installed"
 else
@@ -106,7 +109,7 @@ if [[ ${#NEEDED[@]} -eq 0 ]]; then
   echo "✓ All ${#SEEN[@]} packages already installed"
 else
   echo "Installing ${#NEEDED[@]} packages (${#SEEN[@]} total, $((${#SEEN[@]} - ${#NEEDED[@]})) already installed)..."
-  [[ "$PM" == "apt" ]] && sudo apt-get update -qq
+  [[ "$PM" == "apt" ]] && $SUDO apt-get update -qq
 
   for pkg in "${NEEDED[@]}"; do
     echo "  → $pkg"
@@ -142,7 +145,7 @@ if command -v tmux &>/dev/null && ! command -v sesh &>/dev/null; then
       tmp="$(mktemp -d)"
       curl -sL "$SESH_URL" -o "$tmp/sesh.tar.gz"
       tar -xzf "$tmp/sesh.tar.gz" -C "$tmp"
-      sudo install -m 755 "$tmp/sesh" /usr/local/bin/sesh
+      $SUDO install -m 755 "$tmp/sesh" /usr/local/bin/sesh
       rm -rf "$tmp"
       echo "✓ sesh installed"
     else
@@ -172,7 +175,7 @@ if ! command -v dua &>/dev/null; then
       tmp="$(mktemp -d)"
       curl -sL "$DUA_URL" -o "$tmp/dua.tar.gz"
       tar -xzf "$tmp/dua.tar.gz" -C "$tmp"
-      sudo install -m 755 "$tmp"/dua-*/dua /usr/local/bin/dua
+      $SUDO install -m 755 "$tmp"/dua-*/dua /usr/local/bin/dua
       rm -rf "$tmp"
       echo "✓ dua-cli installed"
     else
@@ -203,7 +206,7 @@ if ! command -v broot &>/dev/null; then
     if [[ -n "$BROOT_URL" ]]; then
       tmp="$(mktemp -d)"
       curl -sL "$BROOT_URL" -o "$tmp/broot"
-      sudo install -m 755 "$tmp/broot" /usr/local/bin/broot
+      $SUDO install -m 755 "$tmp/broot" /usr/local/bin/broot
       rm -rf "$tmp"
       echo "✓ broot installed"
     else

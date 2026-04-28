@@ -2,7 +2,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Skip gracefully if no sudo access (non-interactive chezmoi context)
+# Skip gracefully if no root/sudo access (non-interactive chezmoi context)
 if [[ "$(id -u)" -ne 0 ]]; then
   if ! command -v sudo &>/dev/null || ! sudo -n true 2>/dev/null; then
     echo "⚠ No root/sudo access — skipping Linux package install"

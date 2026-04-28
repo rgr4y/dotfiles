@@ -29,6 +29,10 @@ is_macos() { [[ "$DOTFILES_OS" == "darwin" ]]; }
 is_linux() { [[ "$DOTFILES_OS" == "linux" ]]; }
 is_wsl()   { [[ "$(uname -r)" == *microsoft* ]]; }
 
+if [[ "$GOOGLE_CLOUD_SHELL" == "true" ]]; then
+  sudo hostname cloud-shell 2>/dev/null
+fi
+
 # ──────────────────────────────────────────────
 # 4. Core Settings
 # ──────────────────────────────────────────────
