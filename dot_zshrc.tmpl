@@ -45,6 +45,7 @@ export FUNCNEST=256
 export LESS='-R -M -i'
 export EDITOR=vim
 export RCLONE_PROGRESS=true
+export LC_ALL=en_US.UTF-8
 
 # Key bindings (vi mode)
 bindkey -v
@@ -56,27 +57,7 @@ bindkey -M viins '^E' vi-end-of-line
 # ──────────────────────────────────────────────
 # 5. Zi Plugin Manager
 # ──────────────────────────────────────────────
-if [[ ! -f "$HOME/.zi/bin/zi.zsh" ]]; then
-  mkdir -p "$HOME/.zi/bin"
-  git clone --depth 1 https://github.com/z-shell/zi.git "$HOME/.zi/bin" 2>/dev/null
-fi
-
-[[ -f "$HOME/.zi/bin/zi.zsh" ]] && source "$HOME/.zi/bin/zi.zsh"
-
-
-# Core plugins (always)
-zi light zsh-users/zsh-autosuggestions
-zi light zsh-users/zsh-syntax-highlighting
-zi light agkozak/zsh-z
-command -v sudo &>/dev/null && zi snippet OMZP::sudo
-
-{{ if eq .profile "full" -}}
-# Extra plugins (full profile)
-zi light alexrochas/zsh-extract
-zi light alexrochas/zsh-vim-crtl-z
-zi light alexrochas/zsh-git-semantic-commits
-zi light alexrochas/zsh-path-environment-explorer
-{{ end -}}
+[[ -f "$HOME/.zshrc.zi.zsh" ]] && source "$HOME/.zshrc.zi.zsh"
 
 {{ if .modules.vscode -}}
 # ──────────────────────────────────────────────

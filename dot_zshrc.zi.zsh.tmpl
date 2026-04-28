@@ -1,0 +1,34 @@
+# Zi plugin manager
+if [[ ! -f "$HOME/.zi/bin/zi.zsh" ]]; then
+  zi_install_lock="$HOME/.zi/install.lock"
+  mkdir -p "$HOME/.zi"
+
+  if mkdir "$zi_install_lock" 2>/dev/null; then
+    mkdir -p "$HOME/.zi/bin"
+    GIT_TERMINAL_PROMPT=0 git clone --depth 1 https://github.com/z-shell/zi.git "$HOME/.zi/bin" 2>/dev/null
+    rmdir "$zi_install_lock" 2>/dev/null
+  else
+    for _zi_wait in {1..30}; do
+      [[ -f "$HOME/.zi/bin/zi.zsh" ]] && break
+      sleep 1
+    done
+  fi
+  unset zi_install_lock _zi_wait
+fi
+
+[[ -f "$HOME/.zi/bin/zi.zsh" ]] || return 0 2>/dev/null || exit 0
+source "$HOME/.zi/bin/zi.zsh"
+
+# Core plugins (always)
+zi light zsh-users/zsh-autosuggestions
+zi light zsh-users/zsh-syntax-highlighting
+zi light agkozak/zsh-z
+command -v sudo &>/dev/null && zi snippet OMZP::sudo
+
+{{ if eq .profile "full" -}}
+# Extra plugins (full profile)
+zi light alexrochas/zsh-extract
+zi light alexrochas/zsh-vim-crtl-z
+zi light alexrochas/zsh-git-semantic-commits
+zi light alexrochas/zsh-path-environment-explorer
+{{ end -}}

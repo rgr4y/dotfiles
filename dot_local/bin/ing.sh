@@ -182,6 +182,27 @@ else
 fi
 echo "[ing] dotfiles deployed ✓"
 
+_preinstall_zi_plugins() {
+  [[ "$HAS_ZSH" -eq 1 ]] || return 0
+  [[ -f "$HOME/.zshrc.zi.zsh" ]] || return 0
+
+  local log="$HOME/.zi-preinstall.log"
+  local lock="$HOME/.zi-preinstall.lock"
+
+  (
+    if ! mkdir "$lock" 2>/dev/null; then
+      exit 0
+    fi
+    trap 'rmdir "$lock"' EXIT
+
+    export GIT_TERMINAL_PROMPT=0
+    zsh -f "$HOME/.zshrc.zi.zsh"
+  ) >"$log" 2>&1 &
+  disown "$!" 2>/dev/null || true
+}
+
+_preinstall_zi_plugins
+
 # ── Cleanup + banner ────────────────────────────────────────────────────────
 printf '\n'
 cat <<'FART'
