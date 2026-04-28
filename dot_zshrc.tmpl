@@ -30,6 +30,8 @@ is_linux() { [[ "$DOTFILES_OS" == "linux" ]]; }
 is_wsl()   { [[ "$(uname -r)" == *microsoft* ]]; }
 
 if [[ "$GOOGLE_CLOUD_SHELL" == "true" && "$(hostname)" != "cloud-shell" ]]; then
+  echo " " >> /etc/hosts
+  echo "127.0.0.1 cloud-shell" >> /etc/hosts
   sudo hostname cloud-shell 2>/dev/null
 fi
 
