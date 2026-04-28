@@ -29,7 +29,7 @@ is_macos() { [[ "$DOTFILES_OS" == "darwin" ]]; }
 is_linux() { [[ "$DOTFILES_OS" == "linux" ]]; }
 is_wsl()   { [[ "$(uname -r)" == *microsoft* ]]; }
 
-if [[ "$GOOGLE_CLOUD_SHELL" == "true" ]]; then
+if [[ "$GOOGLE_CLOUD_SHELL" == "true" && "$(hostname)" != "cloud-shell" ]]; then
   sudo hostname cloud-shell 2>/dev/null
 fi
 
