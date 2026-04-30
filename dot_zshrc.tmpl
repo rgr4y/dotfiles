@@ -1,7 +1,11 @@
 # ──────────────────────────────────────────────
 # 1. PATH
 # ──────────────────────────────────────────────
+{{- if eq .chezmoi.os "darwin" }}
+export PATH="$HOME/bin:$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/local/sbin:$PATH"
+{{- else }}
 export PATH="$HOME/bin:$HOME/.local/bin:/usr/local/bin:/usr/local/sbin:$PATH"
+{{- end }}
 
 # ──────────────────────────────────────────────
 # 2. History
@@ -12,9 +16,12 @@ SAVEHIST=1000000000
 setopt INC_APPEND_HISTORY
 setopt SHARE_HISTORY
 setopt HIST_IGNORE_DUPS
+setopt HIST_IGNORE_SPACE
+setopt HIST_FIND_NO_DUPS
 setopt HIST_REDUCE_BLANKS
 setopt EXTENDED_HISTORY
 setopt HIST_VERIFY
+setopt AUTO_CD
 
 # ──────────────────────────────────────────────
 # 3. OS Detection
@@ -40,6 +47,7 @@ fi
 # ──────────────────────────────────────────────
 export ZDOTDIR=$HOME
 export ZSH_COMPDUMP=$HOME/.zcompdump
+export ZSHZ_TILDE=1
 export ZSH_DISABLE_COMPFIX=true
 export FUNCNEST=256
 export LESS='-R -M -i'
@@ -49,10 +57,36 @@ export LC_ALL=en_US.UTF-8
 
 # Key bindings (vi mode)
 bindkey -v
+KEYTIMEOUT=1
 bindkey "^A" vi-beginning-of-line
 bindkey "^E" vi-end-of-line
 bindkey -M viins '^A' vi-beginning-of-line
 bindkey -M viins '^E' vi-end-of-line
+
+# Word navigation (Option+Arrow)
+bindkey -M viins '\e[1;3D' backward-word
+bindkey -M viins '\e[1;3C' forward-word
+bindkey -M viins '\eb' backward-word
+bindkey -M viins '\ef' forward-word
+
+# Home/End (fn+Left/Right)
+bindkey -M viins '\e[1~' beginning-of-line
+bindkey -M viins '\e[4~' end-of-line
+bindkey -M vicmd '\e[1~' beginning-of-line
+bindkey -M vicmd '\e[4~' end-of-line
+
+# Option+Backspace: delete word backward
+bindkey -M viins '\e^?' backward-kill-word
+
+# Cmd+Backspace: delete to line start (needs iTerm2 key mapping)
+bindkey -M viins '^U' backward-kill-line
+
+# Option+Delete: delete word forward
+bindkey -M viins '\e[3;3~' kill-word
+
+# Bracketed paste
+autoload -Uz bracketed-paste-magic
+zle -N bracketed-paste bracketed-paste-magic
 
 # ──────────────────────────────────────────────
 # 5. Zi Plugin Manager
@@ -65,7 +99,7 @@ bindkey -M viins '^E' vi-end-of-line
 # ──────────────────────────────────────────────
 if [[ "$TERM_PROGRAM" == "vscode" || "$TERMINAL_EMULATOR" == "JetBrains-JediTerm" ]]; then
   {{ if .modules.nvm -}}
-  # Lazy-load nvm for vscode
+  # fnm for vscode
   [[ -f "$HOME/.zshrc.nvm.zsh" ]] && source "$HOME/.zshrc.nvm.zsh"
   {{ end -}}
   {{ if .modules.bun -}}
@@ -79,7 +113,7 @@ fi
 
 {{ if .modules.nvm -}}
 # ──────────────────────────────────────────────
-# NVM (lazy-loaded)
+# fnm (Fast Node Manager)
 # ──────────────────────────────────────────────
 [[ -f "$HOME/.zshrc.nvm.zsh" ]] && source "$HOME/.zshrc.nvm.zsh"
 {{ end -}}
@@ -183,7 +217,8 @@ fi
 [[ -f "$HOME/.aliases.local.zsh" ]] && source "$HOME/.aliases.local.zsh"
 
 {{ if .modules.nvm -}}
-[ -n "$NVM_DIR" ] && [ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"
+# fnm completions
+eval "$(fnm completions --shell zsh)"
 {{ end -}}
 
 {{- if eq .chezmoi.os "darwin" }}
@@ -192,4 +227,10 @@ fpath=($HOME/.docker/completions $fpath)
 autoload -Uz compinit
 # Strip any fpath entries that don't exist (avoids compinit errors from missing zi completions)
 fpath=(${^fpath}(N))
+zstyle ':completion:*' menu list-packed
 compinit
+
+# ──────────────────────────────────────────────
+# Local overrides
+# ──────────────────────────────────────────────
+[[ -f "$HOME/.zshrc.local.zsh" ]] && source "$HOME/.zshrc.local.zsh"

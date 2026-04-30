@@ -177,7 +177,7 @@ YELLOW=$(_tput setaf 3)
 # Single-select: bare or full
 select_profile() {
   local options=("bare" "full")
-  local descriptions=("Minimal — syntax highlighting, basic vim, no extras" "Everything — CoC, nvm, pyenv, tmux, the works")
+  local descriptions=("Minimal — syntax highlighting, basic vim, no extras" "Everything — CoC, fnm, pyenv, tmux, the works")
   local selected=0
 
   echo "${BOLD}Select profile:${RESET}"
@@ -217,7 +217,7 @@ select_profile() {
 # Multi-select: spacebar checklist
 select_modules() {
   local -a names=("nvm" "pyenv" "bun" "php" "copilot" "tmux" "fzf" "vscode")
-  local -a descs=("Node version manager" "Python version manager" "Bun JS runtime" "PHP aliases (phpd, etc.)" "GitHub Copilot CLI" "Tmux + powerline" "Fuzzy finder keybindings" "VSCode terminal integration")
+  local -a descs=("fnm (Fast Node Manager)" "Python version manager" "Bun JS runtime" "PHP aliases (phpd, etc.)" "GitHub Copilot CLI" "Tmux + powerline" "Fuzzy finder keybindings" "VSCode terminal integration")
   local -a checked
 
   # defaults based on profile
