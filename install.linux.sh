@@ -45,13 +45,13 @@ elif command -v sudo &>/dev/null; then
   _log "sudo found at $(command -v sudo)"
   if ! sudo -n true 2>/dev/null; then
     echo "Need sudo to install packages..."
-    sudo -v || { echo "⚠ Failed to get sudo — skipping packages"; exit 1; }
+    sudo -v || { echo "⚠ Failed to get sudo — skipping packages"; exit 0; }
   fi
   SUDO="sudo"
   _log "SUDO=sudo (passwordless=$(sudo -n true 2>/dev/null && echo yes || echo no))"
 else
-  echo "⚠ sudo not found and not root — can't install system packages"
-  exit 1
+  echo "⚠ sudo not found and not root — skipping packages"
+  exit 0
 fi
 
 # ──────────────────────────────────────────────
@@ -72,8 +72,8 @@ elif command -v pacman &>/dev/null; then
   PM="pacman"
   INSTALL="$SUDO pacman -S --noconfirm"
 else
-  echo "⚠ No supported package manager (apk/apt/yum/pacman) found"
-  exit 1
+  echo "⚠ No supported package manager (apk/apt/yum/pacman) found — skipping"
+  exit 0
 fi
 _log "PM=$PM"
 _log "INSTALL=$INSTALL"
