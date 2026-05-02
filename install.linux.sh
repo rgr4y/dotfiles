@@ -59,7 +59,10 @@ fi
 # ──────────────────────────────────────────────
 PM=""
 INSTALL=""
-if command -v apt-get &>/dev/null; then
+if command -v apk &>/dev/null; then
+  PM="apk"
+  INSTALL="$SUDO apk add --no-cache"
+elif command -v apt-get &>/dev/null; then
   PM="apt"
   INSTALL="$SUDO env DEBIAN_FRONTEND=noninteractive apt-get install --no-install-recommends -y"
 elif command -v yum &>/dev/null; then
@@ -69,7 +72,7 @@ elif command -v pacman &>/dev/null; then
   PM="pacman"
   INSTALL="$SUDO pacman -S --noconfirm"
 else
-  echo "⚠ No supported package manager (apt/yum/pacman) found"
+  echo "⚠ No supported package manager (apk/apt/yum/pacman) found"
   exit 1
 fi
 _log "PM=$PM"
@@ -77,6 +80,7 @@ _log "INSTALL=$INSTALL"
 
 _pkg_installed() {
   case "$PM" in
+    apk)    apk info -e "$1" &>/dev/null ;;
     apt)    dpkg -s "$1" &>/dev/null ;;
     yum)    rpm -q "$1" &>/dev/null ;;
     pacman) pacman -Qi "$1" &>/dev/null ;;
