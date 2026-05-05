@@ -30,10 +30,14 @@ _log "RUNPOD_PUBLIC_IP=${RUNPOD_PUBLIC_IP:-unset}"
 CACHE_DIR="$HOME/.dotfiles-cache"
 BIN_CACHE="$CACHE_DIR/bin.tar.gz"
 DEB_CACHE="$CACHE_DIR/debs.tar.gz"
+LISTS_CACHE="$CACHE_DIR/apt-lists.tar.gz"
+ZSH_CACHE="$CACHE_DIR/zsh.tar.gz"
 CACHE_BINS=(/usr/local/bin/sesh /usr/local/bin/dua /usr/local/bin/broot)
 _log "CACHE_DIR=$CACHE_DIR"
 _log "BIN_CACHE exists: $(test -f "$BIN_CACHE" && echo yes || echo no)"
 _log "DEB_CACHE exists: $(test -f "$DEB_CACHE" && echo yes || echo no)"
+_log "LISTS_CACHE exists: $(test -f "$LISTS_CACHE" && echo yes || echo no)"
+_log "ZSH_CACHE exists: $(test -f "$ZSH_CACHE" && echo yes || echo no)"
 
 # ──────────────────────────────────────────────
 # Sudo check — skip if already root
@@ -87,22 +91,72 @@ _pkg_installed() {
   esac
 }
 
+# Restore cached apt lists or run apt-get update, then save lists after
+_apt_update() {
+  local lists_dir="/var/lib/apt/lists"
+  if [[ -f "$LISTS_CACHE" ]]; then
+    _log "Restoring apt lists from cache ($(du -h "$LISTS_CACHE" | cut -f1))..."
+    $SUDO tar xzf "$LISTS_CACHE" -C "$lists_dir" 2>/dev/null && \
+      _log "apt lists restored from cache" || \
+      { _log "apt lists cache corrupt, running update"; $SUDO apt-get update -qq; }
+  else
+    _log "No apt lists cache, running apt-get update..."
+    $SUDO apt-get update -qq
+    _log "apt-get update exit code: $?"
+    # Save lists for next run
+    local list_count
+    list_count=$(find "$lists_dir" -maxdepth 1 -type f | wc -l)
+    _log "Saving apt lists ($list_count files) to cache..."
+    if [[ "$list_count" -gt 0 ]]; then
+      mkdir -p "$CACHE_DIR"
+      $SUDO tar czf "$LISTS_CACHE" -C "$lists_dir" . 2>/dev/null && \
+        _log "apt lists cached ($(du -h "$LISTS_CACHE" | cut -f1))"
+      # Make readable by user so future runs don't need sudo to read it
+      $SUDO chown "$(id -u):$(id -g)" "$LISTS_CACHE" 2>/dev/null || true
+    fi
+  fi
+}
+
 # ──────────────────────────────────────────────
 # Install zsh first (needed before everything)
 # ──────────────────────────────────────────────
 if ! command -v zsh &>/dev/null; then
-  echo "Installing zsh..."
-  _log "zsh not found, installing via $PM"
-  if [[ "$PM" == "apt" ]]; then
-    _log "Running apt-get update..."
-    $SUDO apt-get update -qq
-    _log "apt-get update exit code: $?"
+  if [[ -f "$ZSH_CACHE" ]]; then
+    _log "Restoring zsh from binary cache..."
+    $SUDO tar xzf "$ZSH_CACHE" -C / 2>/dev/null
+    if command -v zsh &>/dev/null; then
+      echo "✓ zsh restored from cache"
+    else
+      _log "zsh cache restore failed, installing via $PM"
+      if [[ "$PM" == "apt" ]]; then _apt_update; fi
+      $INSTALL zsh
+      _log "zsh install exit code: $?"
+      echo "✓ zsh installed"
+    fi
+  else
+    echo "Installing zsh..."
+    _log "zsh not found, installing via $PM"
+    if [[ "$PM" == "apt" ]]; then
+      _apt_update
+    fi
+    _log "Running: $INSTALL zsh"
+    $INSTALL zsh
+    _log "zsh install exit code: $?"
+    # Save zsh binary cache
+    if command -v zsh &>/dev/null && [[ "$PM" == "apt" ]]; then
+      mkdir -p "$CACHE_DIR"
+      _log "Saving zsh binary cache..."
+      $SUDO tar czf "$ZSH_CACHE" \
+        /usr/bin/zsh \
+        /usr/bin/zsh5 \
+        /usr/lib/x86_64-linux-gnu/zsh 2>/dev/null && {
+        $SUDO chown "$(id -u):$(id -g)" "$ZSH_CACHE" 2>/dev/null || true
+        _log "zsh cache saved ($(du -h "$ZSH_CACHE" | cut -f1))"
+      }
+    fi
+    echo "✓ zsh installed"
   fi
-  _log "Running: $INSTALL zsh"
-  $INSTALL zsh
-  _log "zsh install exit code: $?"
   _log "zsh now at: $(command -v zsh 2>/dev/null || echo NOT_FOUND)"
-  echo "✓ zsh installed"
 else
   _log "zsh already at: $(command -v zsh)"
   echo "✓ zsh already installed"
@@ -171,7 +225,7 @@ elif [[ "$PM" == "apt" && -f "$DEB_CACHE" ]]; then
     _log "Cache empty or corrupt, removing and falling through to network install"
     rm -f "$DEB_CACHE"
     rm -rf "$tmp"
-    $SUDO apt-get update -qq
+    _apt_update
     $INSTALL "${NEEDED[@]}" 2>&1 || {
       for pkg in "${NEEDED[@]}"; do
         $INSTALL "$pkg" 2>/dev/null || echo "    ⚠ $pkg failed"
@@ -194,7 +248,7 @@ elif [[ "$PM" == "apt" && -f "$DEB_CACHE" ]]; then
     if [[ ${#local_still_missing[@]} -gt 0 ]]; then
       _log "Still missing after cache restore: ${local_still_missing[*]}"
       echo "⚠ ${#local_still_missing[@]} packages not in cache, installing from network..."
-      $SUDO apt-get update -qq
+      _apt_update
       $INSTALL "${local_still_missing[@]}" 2>/dev/null || {
         for pkg in "${local_still_missing[@]}"; do
           $INSTALL "$pkg" 2>/dev/null || echo "    ⚠ $pkg failed"
@@ -207,9 +261,7 @@ else
   _log "Taking slow path (no cache or not apt)"
   echo "Installing ${#NEEDED[@]} packages (${#SEEN[@]} total, $((${#SEEN[@]} - ${#NEEDED[@]})) already installed)..."
   if [[ "$PM" == "apt" ]]; then
-    _log "Running apt-get update..."
-    $SUDO apt-get update -qq
-    _log "apt-get update exit code: $?"
+    _apt_update
   fi
 
   for pkg in "${NEEDED[@]}"; do
