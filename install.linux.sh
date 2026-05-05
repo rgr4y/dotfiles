@@ -162,34 +162,47 @@ if [[ ${#NEEDED[@]} -eq 0 ]]; then
 elif [[ "$PM" == "apt" && -f "$DEB_CACHE" ]]; then
   _log "Taking deb cache fast-path"
   _log "DEB_CACHE size: $(du -h "$DEB_CACHE" 2>/dev/null | cut -f1)"
-  echo "Restoring ${#NEEDED[@]} packages from cache..."
   tmp="$(mktemp -d)"
   _log "Extracting to $tmp"
-  tar xzf "$DEB_CACHE" -C "$tmp"
-  _log "Debs in cache: $(ls "$tmp"/*.deb 2>/dev/null | wc -l)"
-  _log "Running dpkg -i..."
-  $SUDO dpkg -i "$tmp"/*.deb 2>&1 | tail -5
-  _log "dpkg exit code: ${PIPESTATUS[0]}"
-  _log "Running apt-get install -f..."
-  $SUDO apt-get install -f -y --no-install-recommends 2>&1 | tail -5
-  _log "apt-get -f exit code: ${PIPESTATUS[0]}"
-  rm -rf "$tmp"
-  # Verify what's still missing after cache restore
-  local_still_missing=()
-  for pkg in "${NEEDED[@]}"; do
-    _pkg_installed "$pkg" || local_still_missing+=("$pkg")
-  done
-  if [[ ${#local_still_missing[@]} -gt 0 ]]; then
-    _log "Still missing after cache restore: ${local_still_missing[*]}"
-    echo "⚠ ${#local_still_missing[@]} packages not in cache, installing from network..."
+  tar xzf "$DEB_CACHE" -C "$tmp" 2>/dev/null || true
+  deb_count="$(ls "$tmp"/*.deb 2>/dev/null | wc -l)"
+  _log "Debs in cache: $deb_count"
+  if [[ "$deb_count" -eq 0 ]]; then
+    _log "Cache empty or corrupt, removing and falling through to network install"
+    rm -f "$DEB_CACHE"
+    rm -rf "$tmp"
     $SUDO apt-get update -qq
-    $INSTALL "${local_still_missing[@]}" 2>/dev/null || {
-      for pkg in "${local_still_missing[@]}"; do
+    $INSTALL "${NEEDED[@]}" 2>&1 || {
+      for pkg in "${NEEDED[@]}"; do
         $INSTALL "$pkg" 2>/dev/null || echo "    ⚠ $pkg failed"
       done
     }
+    echo "✓ Linux packages installed"
+  else
+    echo "Restoring ${#NEEDED[@]} packages from cache..."
+    _log "Running dpkg -i..."
+    $SUDO dpkg -i "$tmp"/*.deb 2>&1 | tail -5
+    _log "dpkg exit code: ${PIPESTATUS[0]}"
+    _log "Running apt-get install -f..."
+    $SUDO apt-get install -f -y --no-install-recommends 2>&1 | tail -5
+    _log "apt-get -f exit code: ${PIPESTATUS[0]}"
+    rm -rf "$tmp"
+    local_still_missing=()
+    for pkg in "${NEEDED[@]}"; do
+      _pkg_installed "$pkg" || local_still_missing+=("$pkg")
+    done
+    if [[ ${#local_still_missing[@]} -gt 0 ]]; then
+      _log "Still missing after cache restore: ${local_still_missing[*]}"
+      echo "⚠ ${#local_still_missing[@]} packages not in cache, installing from network..."
+      $SUDO apt-get update -qq
+      $INSTALL "${local_still_missing[@]}" 2>/dev/null || {
+        for pkg in "${local_still_missing[@]}"; do
+          $INSTALL "$pkg" 2>/dev/null || echo "    ⚠ $pkg failed"
+        done
+      }
+    fi
+    echo "✓ Packages restored from cache"
   fi
-  echo "✓ Packages restored from cache"
 else
   _log "Taking slow path (no cache or not apt)"
   echo "Installing ${#NEEDED[@]} packages (${#SEEN[@]} total, $((${#SEEN[@]} - ${#NEEDED[@]})) already installed)..."
@@ -224,11 +237,16 @@ else
 
   # Cache debs for next boot
   if [[ "$PM" == "apt" ]]; then
-    mkdir -p "$CACHE_DIR"
+    apt_deb_count="$(ls /var/cache/apt/archives/*.deb 2>/dev/null | wc -l)"
     _log "Caching debs from /var/cache/apt/archives..."
-    _log "Deb count: $(ls /var/cache/apt/archives/*.deb 2>/dev/null | wc -l)"
-    tar czf "$DEB_CACHE" -C /var/cache/apt/archives . 2>/dev/null && \
-      echo "✓ Deb cache saved to $DEB_CACHE ($(du -h "$DEB_CACHE" | cut -f1))"
+    _log "Deb count: $apt_deb_count"
+    if [[ "$apt_deb_count" -gt 0 ]]; then
+      mkdir -p "$CACHE_DIR"
+      tar czf "$DEB_CACHE" -C /var/cache/apt/archives $(ls /var/cache/apt/archives/*.deb | xargs -n1 basename) 2>/dev/null && \
+        echo "✓ Deb cache saved to $DEB_CACHE ($(du -h "$DEB_CACHE" | cut -f1))"
+    else
+      _log "No debs in apt cache, skipping cache save"
+    fi
   fi
 
   echo "✓ Linux packages installed"
