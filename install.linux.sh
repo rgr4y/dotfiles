@@ -98,22 +98,34 @@ _apt_update() {
     _log "Restoring apt lists from cache ($(du -h "$LISTS_CACHE" | cut -f1))..."
     $SUDO tar xzf "$LISTS_CACHE" -C "$lists_dir" 2>/dev/null && \
       _log "apt lists restored from cache" || \
-      { _log "apt lists cache corrupt, running update"; $SUDO apt-get update -qq; }
+      { _log "apt lists cache corrupt, running update"; _apt_update_network; }
   else
-    _log "No apt lists cache, running apt-get update..."
-    $SUDO apt-get update -qq
-    _log "apt-get update exit code: $?"
-    # Save lists for next run
-    local list_count
-    list_count=$(find "$lists_dir" -maxdepth 1 -type f | wc -l)
-    _log "Saving apt lists ($list_count files) to cache..."
-    if [[ "$list_count" -gt 0 ]]; then
-      mkdir -p "$CACHE_DIR"
-      $SUDO tar czf "$LISTS_CACHE" -C "$lists_dir" . 2>/dev/null && \
-        _log "apt lists cached ($(du -h "$LISTS_CACHE" | cut -f1))"
-      # Make readable by user so future runs don't need sudo to read it
-      $SUDO chown "$(id -u):$(id -g)" "$LISTS_CACHE" 2>/dev/null || true
+    _apt_update_network
+  fi
+}
+
+_apt_update_network() {
+  local lists_dir="/var/lib/apt/lists"
+  _log "Waiting for apt lock..."
+  local i=0
+  while fuser /var/lib/apt/lists/lock /var/lib/dpkg/lock /var/lib/dpkg/lock-frontend &>/dev/null 2>&1; do
+    (( i++ ))
+    if (( i > 30 )); then
+      _log "apt lock wait timed out after 30s"
+      break
     fi
+    sleep 1
+  done
+  _log "Running apt-get update..."
+  $SUDO apt-get update -qq
+  _log "apt-get update exit code: $?"
+  local list_count
+  list_count=$(find "$lists_dir" -maxdepth 1 -type f | wc -l)
+  if [[ "$list_count" -gt 0 ]]; then
+    mkdir -p "$CACHE_DIR"
+    $SUDO tar czf "$LISTS_CACHE" -C "$lists_dir" . 2>/dev/null && \
+      _log "apt lists cached ($(du -h "$LISTS_CACHE" | cut -f1))"
+    $SUDO chown "$(id -u):$(id -g)" "$LISTS_CACHE" 2>/dev/null || true
   fi
 }
 
