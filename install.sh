@@ -43,15 +43,34 @@ echo
 # 2. Install dependencies
 # ──────────────────────────────────────────────
 install_chezmoi() {
-  if command -v chezmoi &>/dev/null; then
-    echo "✓ chezmoi already installed"
+  if ! command -v chezmoi &>/dev/null; then
+    echo "Installing chezmoi..."
+    mkdir -p "$HOME/.local/bin"
+    sh -c "$(curl -fsLS get.chezmoi.io)" -- -b "$HOME/.local/bin"
+    export PATH="$HOME/.local/bin:$PATH"
+    echo "✓ chezmoi installed"
     return
   fi
-  echo "Installing chezmoi..."
-  mkdir -p "$HOME/.local/bin"
-  sh -c "$(curl -fsLS get.chezmoi.io)" -- -b "$HOME/.local/bin"
-  export PATH="$HOME/.local/bin:$PATH"
-  echo "✓ chezmoi installed"
+
+  local _bin _cur _lat
+  _bin="$(command -v chezmoi)"
+  if ! find "$_bin" -mtime +365 -print -quit 2>/dev/null | grep -q .; then
+    echo "✓ chezmoi up to date ($(chezmoi --version 2>&1 | head -1))"
+    return
+  fi
+
+  _cur="$(chezmoi --version 2>/dev/null | grep -o 'v[0-9][0-9.]*' | head -1)"
+  _lat="$(curl -fsL https://api.github.com/repos/twpayne/chezmoi/releases/latest 2>/dev/null \
+          | grep -o '"tag_name": *"[^"]*"' | head -1 | grep -o 'v[0-9][0-9.]*')"
+  if [[ -n "$_lat" && "$_cur" != "$_lat" ]]; then
+    echo "chezmoi ${_cur} → ${_lat} — upgrading..."
+    mkdir -p "$HOME/.local/bin"
+    sh -c "$(curl -fsLS get.chezmoi.io)" -- -b "$HOME/.local/bin"
+    export PATH="$HOME/.local/bin:$PATH"
+    echo "✓ chezmoi upgraded"
+  else
+    echo "✓ chezmoi ${_cur:-unknown} is latest"
+  fi
 }
 
 install_zi() {

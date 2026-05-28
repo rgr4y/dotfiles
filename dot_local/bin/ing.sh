@@ -127,9 +127,16 @@ if ! command -v chezmoi &>/dev/null; then
   _install_chezmoi
 else
   _chezmoi_bin="$(command -v chezmoi)"
-  if find "$_chezmoi_bin" -mtime +30 -print -quit 2>/dev/null | grep -q .; then
-    echo "[ing] chezmoi older than 30 days — upgrading..."
-    _install_chezmoi
+  if find "$_chezmoi_bin" -mtime +365 -print -quit 2>/dev/null | grep -q .; then
+    _cur="$(chezmoi --version 2>/dev/null | grep -o 'v[0-9][0-9.]*' | head -1)"
+    _lat="$(curl -fsL https://api.github.com/repos/twpayne/chezmoi/releases/latest 2>/dev/null \
+            | grep -o '"tag_name": *"[^"]*"' | head -1 | grep -o 'v[0-9][0-9.]*')"
+    if [[ -n "$_lat" && "$_cur" != "$_lat" ]]; then
+      echo "[ing] chezmoi ${_cur} → ${_lat} — upgrading..."
+      _install_chezmoi
+    else
+      echo "[ing] chezmoi ${_cur:-unknown} is latest"
+    fi
   else
     echo "[ing] chezmoi up to date ($(chezmoi --version 2>&1 | head -1))"
   fi

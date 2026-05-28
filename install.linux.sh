@@ -189,7 +189,7 @@ BASE_PKGS=(
 # ──────────────────────────────────────────────
 FULL_PKGS=(
   iftop iotop btop tree screen tmux rsync rclone
-  dialog util-linux toilet figlet dnsutils
+  dialog util-linux dnsutils
   iputils-ping iproute2 net-tools pigz nmap less
   jq m4 iperf3 gh
 )
@@ -362,74 +362,6 @@ elif [[ -f "$BIN_CACHE" ]]; then
   _log "All binaries present, skipping cache restore"
 else
   _log "No bin cache found, will download individually"
-fi
-
-# ──────────────────────────────────────────────
-# sesh (tmux session manager) — only if tmux installed
-# ──────────────────────────────────────────────
-_log "tmux=$(command -v tmux 2>/dev/null || echo NOT_FOUND) sesh=$(command -v sesh 2>/dev/null || echo NOT_FOUND)"
-if command -v tmux &>/dev/null && ! command -v sesh &>/dev/null; then
-  echo "Installing sesh..."
-  SESH_ARCH="$(uname -m)"
-  _log "SESH_ARCH=$SESH_ARCH"
-  case "$SESH_ARCH" in
-    x86_64)  SESH_ARCH="x86_64" ;;
-    aarch64) SESH_ARCH="arm64" ;;
-    *)       echo "  ⚠ sesh: unsupported arch $SESH_ARCH"; SESH_ARCH="" ;;
-  esac
-  if [[ -n "$SESH_ARCH" ]]; then
-    _log "Fetching sesh release URL from GitHub API..."
-    SESH_URL="$(curl -s https://api.github.com/repos/joshmedeski/sesh/releases/latest \
-      | grep "browser_download_url.*Linux_${SESH_ARCH}.tar.gz" \
-      | cut -d '"' -f 4 || true)"
-    _log "SESH_URL=${SESH_URL:-EMPTY}"
-    if [[ -n "$SESH_URL" ]]; then
-      tmp="$(mktemp -d)"
-      curl -sL "$SESH_URL" -o "$tmp/sesh.tar.gz"
-      tar -xzf "$tmp/sesh.tar.gz" -C "$tmp"
-      $SUDO install -m 755 "$tmp/sesh" /usr/local/bin/sesh
-      rm -rf "$tmp"
-      echo "✓ sesh installed"
-    else
-      echo "  ⚠ sesh: could not find release URL"
-    fi
-  fi
-elif command -v sesh &>/dev/null; then
-  echo "✓ sesh already installed"
-fi
-
-# ──────────────────────────────────────────────
-# dua-cli (disk usage analyzer)
-# ──────────────────────────────────────────────
-_log "dua=$(command -v dua 2>/dev/null || echo NOT_FOUND)"
-if ! command -v dua &>/dev/null; then
-  echo "Installing dua-cli..."
-  DUA_ARCH="$(uname -m)"
-  _log "DUA_ARCH=$DUA_ARCH"
-  case "$DUA_ARCH" in
-    x86_64)  DUA_TARGET="x86_64-unknown-linux-musl" ;;
-    aarch64) DUA_TARGET="aarch64-unknown-linux-musl" ;;
-    *)       echo "  ⚠ dua-cli: unsupported arch $DUA_ARCH"; DUA_TARGET="" ;;
-  esac
-  if [[ -n "$DUA_TARGET" ]]; then
-    _log "Fetching dua-cli release URL from GitHub API..."
-    DUA_URL="$(curl -s https://api.github.com/repos/Byron/dua-cli/releases/latest \
-      | grep "browser_download_url.*${DUA_TARGET}.tar.gz" \
-      | cut -d '"' -f 4 || true)"
-    _log "DUA_URL=${DUA_URL:-EMPTY}"
-    if [[ -n "$DUA_URL" ]]; then
-      tmp="$(mktemp -d)"
-      curl -sL "$DUA_URL" -o "$tmp/dua.tar.gz"
-      tar -xzf "$tmp/dua.tar.gz" -C "$tmp"
-      $SUDO install -m 755 "$tmp"/dua-*/dua /usr/local/bin/dua
-      rm -rf "$tmp"
-      echo "✓ dua-cli installed"
-    else
-      echo "  ⚠ dua-cli: could not find release URL"
-    fi
-  fi
-elif command -v dua &>/dev/null; then
-  echo "✓ dua-cli already installed"
 fi
 
 # ──────────────────────────────────────────────

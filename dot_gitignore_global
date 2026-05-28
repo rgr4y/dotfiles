@@ -5,3 +5,20 @@
 node_modules
 app/homesick.php
 vendor/
+.phpversion
+.secrets
+.env
+dot_DS_Store
+.venv
+__pycache__/
+
+# AI
+.omx
+.claude
+._*
+.mcp.json
+.agents
+.codex
+.ai
+skills-lock.json
+
