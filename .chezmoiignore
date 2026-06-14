@@ -34,3 +34,11 @@ README.md
 .local/bin/dysk-darwin
 .local/bin/dysk-linux.aarch64
 {{ end }}
+
+# Tiny embedded (armv6/armv7) — strip plugin/eyecandy files
+{{ if eq .chezmoi.arch "arm" }}
+.zshrc.zi.zsh
+.zshrc.nvm.zsh
+.neofetch
+.vim/coc-settings.json
+{{ end }}

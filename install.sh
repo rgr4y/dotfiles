@@ -33,21 +33,93 @@ if command -v zsh &>/dev/null; then
   HAS_ZSH=1
 fi
 
+PKG_MGR=""
+if command -v brew &>/dev/null; then
+  PKG_MGR="brew"
+elif command -v apt-get &>/dev/null; then
+  PKG_MGR="apt"
+elif command -v opkg &>/dev/null; then
+  PKG_MGR="opkg"
+fi
+
+# Detect tiny/embedded systems: opkg or 32-bit ARM (armv6l, armv7l, armhf, etc.)
+IS_TINY=0
+ARCH="$(uname -m)"
+case "$ARCH" in
+  armv[67]*|armhf) IS_TINY=1 ;;
+esac
+[[ "$PKG_MGR" == "opkg" ]] && IS_TINY=1
+
 echo "┌─────────────────────────────────────┐"
 echo "│  Dotfiles Bootstrap                 │"
 echo "│  OS: $OS  sudo: $HAS_SUDO  zsh: $HAS_ZSH       │"
+echo "│  pkg: ${PKG_MGR:-none}                          │"
 echo "└─────────────────────────────────────┘"
 echo
 
 # ──────────────────────────────────────────────
 # 2. Install dependencies
 # ──────────────────────────────────────────────
+# Map uname -m to chezmoi release arch names
+_chezmoi_arch() {
+  case "$(uname -m)" in
+    x86_64|amd64)     echo "amd64" ;;
+    aarch64|arm64)    echo "arm64" ;;
+    armv7*|armhf)     echo "arm"   ;;  # armv7 runs armv6 (arm) binary fine
+    armv6*)           echo "arm"   ;;
+    i386|i686)        echo "i386"  ;;
+    mips)             echo "mips"  ;;
+    mipsel|mips64el)  echo "mipsle" ;;
+    *)                echo ""      ;;  # fallback to get.chezmoi.io
+  esac
+}
+
+_chezmoi_download() {
+  local dest="$1"
+  local arch
+  arch="$(_chezmoi_arch)"
+
+  # If we know the arch, download directly — more reliable than get.chezmoi.io on odd platforms
+  if [[ -n "$arch" ]]; then
+    local ver
+    ver="$(curl -fsL https://api.github.com/repos/twpayne/chezmoi/releases/latest 2>/dev/null \
+           | grep -o '"tag_name": *"[^"]*"' | head -1 | grep -o 'v[0-9][0-9.]*')"
+    if [[ -z "$ver" ]]; then
+      echo "⚠ Can't fetch latest chezmoi version, trying get.chezmoi.io..."
+      sh -c "$(curl -fsLS get.chezmoi.io)" -- -b "$dest"
+      return
+    fi
+
+    local url="https://github.com/twpayne/chezmoi/releases/download/${ver}/chezmoi-linux-${arch}"
+    echo "  Downloading chezmoi ${ver} for linux/${arch}..."
+    if curl -fsL "$url" -o "${dest}/chezmoi" && chmod +x "${dest}/chezmoi"; then
+      return 0
+    fi
+
+    # Binary not available — try .tar.gz
+    url="https://github.com/twpayne/chezmoi/releases/download/${ver}/chezmoi_${ver#v}_linux_${arch}.tar.gz"
+    echo "  Trying tarball: ${url}..."
+    local tmp
+    tmp="$(mktemp -d)"
+    if curl -fsL "$url" -o "$tmp/chezmoi.tar.gz" && tar -xzf "$tmp/chezmoi.tar.gz" -C "$tmp" chezmoi 2>/dev/null; then
+      mv "$tmp/chezmoi" "${dest}/chezmoi" && chmod +x "${dest}/chezmoi"
+      rm -rf "$tmp"
+      return 0
+    fi
+    rm -rf "$tmp"
+    echo "⚠ Direct download failed, falling back to get.chezmoi.io..."
+  fi
+
+  sh -c "$(curl -fsLS get.chezmoi.io)" -- -b "$dest"
+}
+
 install_chezmoi() {
+  mkdir -p "$HOME/.local/bin"
+  export PATH="$HOME/.local/bin:$PATH"
+
   if ! command -v chezmoi &>/dev/null; then
     echo "Installing chezmoi..."
-    mkdir -p "$HOME/.local/bin"
-    sh -c "$(curl -fsLS get.chezmoi.io)" -- -b "$HOME/.local/bin"
-    export PATH="$HOME/.local/bin:$PATH"
+    _chezmoi_download "$HOME/.local/bin"
     echo "✓ chezmoi installed"
     return
   fi
@@ -64,9 +136,7 @@ install_chezmoi() {
           | grep -o '"tag_name": *"[^"]*"' | head -1 | grep -o 'v[0-9][0-9.]*')"
   if [[ -n "$_lat" && "$_cur" != "$_lat" ]]; then
     echo "chezmoi ${_cur} → ${_lat} — upgrading..."
-    mkdir -p "$HOME/.local/bin"
-    sh -c "$(curl -fsLS get.chezmoi.io)" -- -b "$HOME/.local/bin"
-    export PATH="$HOME/.local/bin:$PATH"
+    _chezmoi_download "$HOME/.local/bin"
     echo "✓ chezmoi upgraded"
   else
     echo "✓ chezmoi ${_cur:-unknown} is latest"
@@ -74,6 +144,10 @@ install_chezmoi() {
 }
 
 install_zi() {
+  if [[ $IS_TINY -eq 1 ]]; then
+    echo "✓ skipping zi on ${ARCH} (tiny/embedded)"
+    return
+  fi
   if [[ -f "$ZI_HOME/bin/zi.zsh" ]]; then
     echo "✓ zi already installed"
     return
@@ -85,6 +159,10 @@ install_zi() {
 }
 
 install_vim_plug() {
+  if [[ $IS_TINY -eq 1 ]]; then
+    echo "✓ skipping vim-plug on ${ARCH} (tiny/embedded)"
+    return
+  fi
   if [[ -f "$PLUG_VIM" ]]; then
     echo "✓ vim-plug already installed"
     return
@@ -95,7 +173,54 @@ install_vim_plug() {
   echo "✓ vim-plug installed"
 }
 
+install_packages_opkg() {
+  # Minimal packages for embedded/OpenWrt systems
+  # Check available space first — need at least 2MB free on root overlay
+  local avail_kb
+  avail_kb=$(df /overlay 2>/dev/null | awk 'NR==2{print $4}' || df / | awk 'NR==2{print $4}')
+  if [[ -n "$avail_kb" && "$avail_kb" -lt 2048 ]]; then
+    echo "⚠ Only ${avail_kb}KB free — need 2MB minimum for packages. Skipping."
+    return
+  fi
+  echo "Space available: ${avail_kb}KB"
+
+  # Bare essentials only — these are tiny systems
+  local -a PKGS=(vim-full git-http zsh curl wget rsync htop)
+
+  local -a MISSING=()
+  for pkg in "${PKGS[@]}"; do
+    local bin="$pkg"
+    case "$pkg" in
+      vim-full) bin="vim" ;;
+      git-http) bin="git" ;;
+    esac
+    if ! command -v "$bin" &>/dev/null; then
+      MISSING+=("$pkg")
+    fi
+  done
+
+  if [[ ${#MISSING[@]} -eq 0 ]]; then
+    echo "✓ All essential packages already installed"
+    return
+  fi
+
+  echo "Updating opkg feeds..."
+  opkg update 2>/dev/null || true
+
+  echo "Installing ${#MISSING[@]} packages: ${MISSING[*]}"
+  for pkg in "${MISSING[@]}"; do
+    echo "  → $pkg"
+    opkg install "$pkg" 2>&1 || echo "  ⚠ Failed to install $pkg (may need more space)"
+  done
+  echo "✓ opkg packages done"
+}
+
 install_packages() {
+  if [[ "$PKG_MGR" == "opkg" ]]; then
+    install_packages_opkg
+    return
+  fi
+
   # Linux packages handled by chezmoi run_once script
   [[ "$OS" != "darwin" ]] && return
 
@@ -140,6 +265,10 @@ install_packages() {
 }
 
 install_nerd_font() {
+  if [[ $IS_TINY -eq 1 ]]; then
+    echo "✓ skipping nerd font on ${ARCH} (headless/embedded)"
+    return
+  fi
   local FONT_NAME="JetBrainsMono"
   local FONT_URL="https://github.com/ryanoasis/nerd-fonts/releases/latest/download/JetBrainsMono.tar.xz"
   local FONT_DIR
@@ -295,7 +424,7 @@ select_modules() {
 select_profile
 select_modules
 
-
+echo
 echo "${BOLD}Profile:${RESET} $PROFILE"
 echo "${BOLD}Modules:${RESET}"
 for mod in nvm pyenv bun php copilot tmux fzf vscode; do
@@ -354,7 +483,7 @@ chezmoi apply -v
 # ──────────────────────────────────────────────
 # 6. Vim plugins
 # ──────────────────────────────────────────────
-if command -v vim &>/dev/null; then
+if command -v vim &>/dev/null && [[ $IS_TINY -eq 0 ]]; then
   echo "Installing vim plugins..."
   vim +PlugInstall +qall
   echo "✓ Vim plugins installed"

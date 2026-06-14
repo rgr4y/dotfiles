@@ -90,9 +90,11 @@ autoload -Uz bracketed-paste-magic
 zle -N bracketed-paste bracketed-paste-magic
 
 # ──────────────────────────────────────────────
-# 5. Zi Plugin Manager
+# 5. Zi Plugin Manager (skipped on armv6/armv7)
 # ──────────────────────────────────────────────
+{{- if ne .chezmoi.arch "arm" }}
 [[ -f "$HOME/.zshrc.zi.zsh" ]] && source "$HOME/.zshrc.zi.zsh"
+{{- end }}
 
 {{ if .modules.vscode -}}
 # ──────────────────────────────────────────────
@@ -213,7 +215,9 @@ fi
 {{ end -}}
 
 [[ -f "$HOME/.zshrc.prompt.zsh" ]] && source "$HOME/.zshrc.prompt.zsh"
+{{- if ne .chezmoi.arch "arm" }}
 [[ -f "$HOME/.neofetch" ]] && cat "$HOME/.neofetch"
+{{- end }}
 [[ -f "$HOME/.zshrc.aliases.zsh" ]] && source "$HOME/.zshrc.aliases.zsh"
 [[ -f "$HOME/.aliases.local.zsh" ]] && source "$HOME/.aliases.local.zsh"
 
