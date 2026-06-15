@@ -7,7 +7,7 @@ set -euo pipefail
 # ──────────────────────────────────────────────
 
 CHEZMOI_REPO="https://github.com/rgr4y/dotfiles.git"
-CHEZMOI_BIN="$HOME/.local/bin/chezmoi"
+CHEZMOI_BIN_DIR="$HOME/.local/bin"
 ZI_HOME="$HOME/.zi"
 PLUG_VIM="$HOME/.vim/autoload/plug.vim"
 DATA_FILE=""  # set after chezmoi source-path is known
@@ -58,6 +58,47 @@ echo "└───────────────────────�
 echo
 
 # ──────────────────────────────────────────────
+# 1b. Ensure SSL certs exist (needed before any curl/git)
+# ──────────────────────────────────────────────
+if ! curl -fsL https://github.com --head -o /dev/null 2>/dev/null; then
+  echo "⚠ SSL certs missing — installing ca-certificates..."
+  if [[ "$PKG_MGR" == "opkg" ]]; then
+    opkg update 2>/dev/null || true
+    opkg install ca-certificates ca-bundle 2>/dev/null || true
+  elif [[ "$PKG_MGR" == "apt" ]]; then
+    sudo apt-get update -qq 2>/dev/null && sudo apt-get install -y -qq ca-certificates 2>/dev/null || true
+  fi
+  # Verify fix worked
+  if curl -fsL https://github.com --head -o /dev/null 2>/dev/null; then
+    echo "✓ SSL certs installed"
+  else
+    echo "⚠ SSL still failing — curl will use -k (insecure) as fallback"
+    # Export so all curl calls in this script can pick it up
+    export CURL_INSECURE=1
+  fi
+fi
+
+# Helper: curl wrapper that falls back to insecure if certs broken
+_curl() {
+  if [[ "${CURL_INSECURE:-0}" == "1" ]]; then
+    curl -k "$@"
+  else
+    curl "$@"
+  fi
+}
+
+# ──────────────────────────────────────────────
+# 1c. Terminal UI helpers (needed by install + wizard)
+# ──────────────────────────────────────────────
+_tput() { tput "$@" 2>/dev/null || true; }
+BOLD=$(_tput bold)
+DIM=$(_tput dim)
+RESET=$(_tput sgr0)
+GREEN=$(_tput setaf 2)
+CYAN=$(_tput setaf 6)
+YELLOW=$(_tput setaf 3)
+
+# ──────────────────────────────────────────────
 # 2. Install dependencies
 # ──────────────────────────────────────────────
 # Map uname -m to chezmoi release arch names
@@ -82,17 +123,17 @@ _chezmoi_download() {
   # If we know the arch, download directly — more reliable than get.chezmoi.io on odd platforms
   if [[ -n "$arch" ]]; then
     local ver
-    ver="$(curl -fsL https://api.github.com/repos/twpayne/chezmoi/releases/latest 2>/dev/null \
+    ver="$(_curl -fsL https://api.github.com/repos/twpayne/chezmoi/releases/latest 2>/dev/null \
            | grep -o '"tag_name": *"[^"]*"' | head -1 | grep -o 'v[0-9][0-9.]*')"
     if [[ -z "$ver" ]]; then
       echo "⚠ Can't fetch latest chezmoi version, trying get.chezmoi.io..."
-      sh -c "$(curl -fsLS get.chezmoi.io)" -- -b "$dest"
+      sh -c "$(_curl -fsLS get.chezmoi.io)" -- -b "$dest"
       return
     fi
 
     local url="https://github.com/twpayne/chezmoi/releases/download/${ver}/chezmoi-linux-${arch}"
     echo "  Downloading chezmoi ${ver} for linux/${arch}..."
-    if curl -fsL "$url" -o "${dest}/chezmoi" && chmod +x "${dest}/chezmoi"; then
+    if _curl -fsL "$url" -o "${dest}/chezmoi" && chmod +x "${dest}/chezmoi"; then
       return 0
     fi
 
@@ -101,7 +142,7 @@ _chezmoi_download() {
     echo "  Trying tarball: ${url}..."
     local tmp
     tmp="$(mktemp -d)"
-    if curl -fsL "$url" -o "$tmp/chezmoi.tar.gz" && tar -xzf "$tmp/chezmoi.tar.gz" -C "$tmp" chezmoi 2>/dev/null; then
+    if _curl -fsL "$url" -o "$tmp/chezmoi.tar.gz" && tar -xzf "$tmp/chezmoi.tar.gz" -C "$tmp" chezmoi 2>/dev/null; then
       mv "$tmp/chezmoi" "${dest}/chezmoi" && chmod +x "${dest}/chezmoi"
       rm -rf "$tmp"
       return 0
@@ -110,16 +151,96 @@ _chezmoi_download() {
     echo "⚠ Direct download failed, falling back to get.chezmoi.io..."
   fi
 
-  sh -c "$(curl -fsLS get.chezmoi.io)" -- -b "$dest"
+  sh -c "$(_curl -fsLS get.chezmoi.io)" -- -b "$dest"
+}
+
+_select_chezmoi_dir() {
+  # On tiny/embedded systems, $HOME/.local/bin may be on a cramped rootfs.
+  # Discover writable mounts with space and let the user choose.
+  if [[ $IS_TINY -eq 0 ]]; then
+    echo "$HOME/.local/bin"
+    return
+  fi
+
+  local -a candidates=()
+  local -a labels=()
+  local default_dir="$HOME/.local/bin"
+
+  # Always include the default
+  candidates+=("$default_dir")
+  local default_avail
+  default_avail=$(df -m "$HOME" 2>/dev/null | awk 'NR==2{print $4}')
+  labels+=("$default_dir (${default_avail:-?}MB free)")
+
+  # Probe common writable locations on embedded systems
+  local dir
+  for dir in /userdata /opt /tmp /mnt/data; do
+    [[ -d "$dir" && -w "$dir" ]] || continue
+    local cand="$dir/.local/bin"
+    [[ "$cand" == "$default_dir" ]] && continue
+    local avail
+    avail=$(df -m "$dir" 2>/dev/null | awk 'NR==2{print $4}')
+    [[ -z "$avail" || "$avail" -lt 20 ]] && continue
+    candidates+=("$cand")
+    labels+=("$cand (${avail}MB free)")
+  done
+
+  if [[ ${#candidates[@]} -le 1 ]]; then
+    echo "$default_dir"
+    return
+  fi
+
+  # Pick the candidate with most space as default selection
+  local best=0 best_avail=0
+  for ((i = 0; i < ${#candidates[@]}; i++)); do
+    local dir_check="${candidates[$i]%/.local/bin}"
+    [[ -z "$dir_check" ]] && dir_check="/"
+    local avail
+    avail=$(df -m "$dir_check" 2>/dev/null | awk 'NR==2{print $4}')
+    if [[ -n "$avail" && "$avail" -gt "$best_avail" ]]; then
+      best=$i
+      best_avail=$avail
+    fi
+  done
+
+  local selected=$best
+  echo
+  echo "${BOLD}Install chezmoi to:${RESET}"
+  echo "${DIM}(↑/↓ to move, Enter to select)${RESET}"
+  echo
+
+  _tput civis
+  while true; do
+    for ((i = 0; i < ${#candidates[@]}; i++)); do
+      if [[ $i -eq $selected ]]; then
+        echo -e "\r  ${GREEN}▸ ${labels[$i]}${RESET}   "
+      else
+        echo -e "\r    ${labels[$i]}   "
+      fi
+    done
+
+    IFS= read -rsn1 key
+    case "$key" in
+      A|k) ((selected > 0)) && ((selected--)) ;;
+      B|j) ((selected < ${#candidates[@]} - 1)) && ((selected++)) ;;
+      "")  break ;;
+    esac
+    printf "\033[%dA" "${#candidates[@]}"
+  done
+  _tput cnorm
+  echo
+
+  echo "${candidates[$selected]}"
 }
 
 install_chezmoi() {
-  mkdir -p "$HOME/.local/bin"
-  export PATH="$HOME/.local/bin:$PATH"
+  CHEZMOI_BIN_DIR="$(_select_chezmoi_dir)"
+  mkdir -p "$CHEZMOI_BIN_DIR"
+  export PATH="$CHEZMOI_BIN_DIR:$PATH"
 
   if ! command -v chezmoi &>/dev/null; then
-    echo "Installing chezmoi..."
-    _chezmoi_download "$HOME/.local/bin"
+    echo "Installing chezmoi to $CHEZMOI_BIN_DIR..."
+    _chezmoi_download "$CHEZMOI_BIN_DIR"
     echo "✓ chezmoi installed"
     return
   fi
@@ -132,11 +253,11 @@ install_chezmoi() {
   fi
 
   _cur="$(chezmoi --version 2>/dev/null | grep -o 'v[0-9][0-9.]*' | head -1)"
-  _lat="$(curl -fsL https://api.github.com/repos/twpayne/chezmoi/releases/latest 2>/dev/null \
+  _lat="$(_curl -fsL https://api.github.com/repos/twpayne/chezmoi/releases/latest 2>/dev/null \
           | grep -o '"tag_name": *"[^"]*"' | head -1 | grep -o 'v[0-9][0-9.]*')"
   if [[ -n "$_lat" && "$_cur" != "$_lat" ]]; then
     echo "chezmoi ${_cur} → ${_lat} — upgrading..."
-    _chezmoi_download "$HOME/.local/bin"
+    _chezmoi_download "$CHEZMOI_BIN_DIR"
     echo "✓ chezmoi upgraded"
   else
     echo "✓ chezmoi ${_cur:-unknown} is latest"
@@ -144,8 +265,8 @@ install_chezmoi() {
 }
 
 install_zi() {
-  if [[ $IS_TINY -eq 1 ]]; then
-    echo "✓ skipping zi on ${ARCH} (tiny/embedded)"
+  if ! command -v git &>/dev/null; then
+    echo "⚠ git not found — skipping zi"
     return
   fi
   if [[ -f "$ZI_HOME/bin/zi.zsh" ]]; then
@@ -168,7 +289,7 @@ install_vim_plug() {
     return
   fi
   echo "Installing vim-plug..."
-  curl -fLo "$PLUG_VIM" --create-dirs \
+  _curl -fLo "$PLUG_VIM" --create-dirs \
     https://raw.githubusercontent.com/junegunn/vim-plug/master/plug.vim 2>/dev/null
   echo "✓ vim-plug installed"
 }
@@ -258,7 +379,7 @@ install_packages() {
   if ! command -v diff-so-fancy &>/dev/null; then
     echo "Installing diff-so-fancy..."
     mkdir -p "$HOME/.local/bin"
-    curl -sL https://raw.githubusercontent.com/so-fancy/diff-so-fancy/master/third_party/build_fatpack/diff-so-fancy \
+    _curl -sL https://raw.githubusercontent.com/so-fancy/diff-so-fancy/master/third_party/build_fatpack/diff-so-fancy \
       -o "$HOME/.local/bin/diff-so-fancy" && chmod +x "$HOME/.local/bin/diff-so-fancy"
     echo "✓ diff-so-fancy installed"
   fi
@@ -288,7 +409,7 @@ install_nerd_font() {
   mkdir -p "$FONT_DIR"
   local tmp
   tmp="$(mktemp -d)"
-  curl -sL "$FONT_URL" -o "$tmp/font.tar.xz"
+  _curl -sL "$FONT_URL" -o "$tmp/font.tar.xz"
   tar -xf "$tmp/font.tar.xz" -C "$tmp"
   # Only copy the regular/bold/italic .ttf files, skip Windows-compat ones
   find "$tmp" -name "*.ttf" ! -name "*Windows*" -exec cp {} "$FONT_DIR/" \;
@@ -313,20 +434,18 @@ echo
 # 3. Interactive Wizard
 # ──────────────────────────────────────────────
 
-# Terminal UI helpers
-_tput() { tput "$@" 2>/dev/null || true; }
-BOLD=$(_tput bold)
-DIM=$(_tput dim)
-RESET=$(_tput sgr0)
-GREEN=$(_tput setaf 2)
-CYAN=$(_tput setaf 6)
-YELLOW=$(_tput setaf 3)
-
-# Single-select: bare or full
+# Single-select: tiny / lite / full
 select_profile() {
-  local options=("bare" "full")
-  local descriptions=("Minimal — syntax highlighting, basic vim, no extras" "Everything — CoC, fnm, pyenv, tmux, the works")
+  local options=("tiny" "lite" "full")
+  local descriptions=("Embedded — core plugins, no tmux, no extras" "Lightweight — core plugins, fzf, no tmux" "Everything — CoC, fnm, pyenv, tmux, the works")
   local selected=0
+
+  # Pre-select based on detected environment
+  if [[ $IS_TINY -eq 1 ]]; then
+    selected=0
+  else
+    selected=2
+  fi
 
   echo "${BOLD}Select profile:${RESET}"
   echo "${DIM}(↑/↓ to move, Enter to select)${RESET}"
@@ -369,11 +488,11 @@ select_modules() {
   local -a checked
 
   # defaults based on profile
-  if [[ "$PROFILE" == "full" ]]; then
-    checked=(1 1 1 1 1 1 1 1)
-  else
-    checked=(0 0 0 0 0 0 0 0)
-  fi
+  case "$PROFILE" in
+    full) checked=(1 1 1 1 1 1 1 1) ;;          # everything
+    lite) checked=(1 0 0 0 0 0 1 1) ;;          # nvm + fzf + vscode
+    tiny) checked=(0 0 0 0 0 0 0 0) ;;          # nothing
+  esac
 
   local cursor=0
 
