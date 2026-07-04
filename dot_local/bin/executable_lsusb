@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # lsusb - List USB devices on macOS and Linux
 #
@@ -55,10 +55,60 @@ RED="\033[0;31m"
 GREEN="\033[0;32m"
 YELLOW="\033[0;33m"
 BLUE="\033[0;34m"
+CYAN="\033[0;36m"
+DIM="\033[2m"
 NC="\033[0m" # No Color
 
 # Detect operating system
 OS_TYPE=$(uname -s)
+
+# Collect serial port → USB device mapping (macOS only)
+declare -A serial_port_map   # key: "vendorhex:producthex" → value: "/dev/cu.xxx"
+declare -a serial_ports      # list of cu.* paths for header display
+
+if [[ "$OS_TYPE" == "Darwin" ]]; then
+    # Get filtered cu.* devices
+    while IFS= read -r cudev; do
+        [[ -z "$cudev" ]] && continue
+        serial_ports+=("$cudev")
+    done < <(ls /dev/cu.* 2>/dev/null | grep -v -E '(Bluetooth-Incoming-Port|debug-console)')
+
+    if [[ ${#serial_ports[@]} -gt 0 ]]; then
+        # Build ioreg tree once, extract serial→USB mappings
+        ioreg_data=$(ioreg -t -l -c IOSerialBSDClient 2>/dev/null)
+        for cudev in "${serial_ports[@]}"; do
+            # Find this cu device in ioreg output, walk up to find idVendor/idProduct
+            parent_block=$(echo "$ioreg_data" | grep -B 100 "\"IOCalloutDevice\" = \"$cudev\"" | tail -100)
+            # Get last (closest parent) idVendor and idProduct in decimal
+            dec_vendor=$(echo "$parent_block" | grep -oE '"idVendor" *= *[0-9]+' | tail -1 | sed 's/.*[= ] *//')
+            dec_product=$(echo "$parent_block" | grep -oE '"idProduct" *= *[0-9]+' | tail -1 | sed 's/.*[= ] *//')
+            if [[ -n "$dec_vendor" && -n "$dec_product" ]]; then
+                hex_vendor=$(printf "0x%04x" "$dec_vendor")
+                hex_product=$(printf "0x%04x" "$dec_product")
+                serial_port_map["${hex_vendor}:${hex_product}"]="$cudev"
+            fi
+        done
+    fi
+elif [[ "$OS_TYPE" == "Linux" ]]; then
+    # Map /dev/ttyUSB* and /dev/ttyACM* to USB vendor:product via sysfs
+    for tty in /sys/class/tty/ttyUSB* /sys/class/tty/ttyACM*; do
+        [[ -e "$tty" ]] || continue
+        devname=$(basename "$tty")
+        [[ -e "/dev/$devname" ]] || continue
+        serial_ports+=("/dev/$devname")
+        # Walk sysfs parents to find USB idVendor/idProduct
+        devpath=$(readlink -f "$tty/device")
+        while [[ -n "$devpath" && "$devpath" != "/" ]]; do
+            if [[ -f "$devpath/idVendor" && -f "$devpath/idProduct" ]]; then
+                hex_vendor="0x$(cat "$devpath/idVendor")"
+                hex_product="0x$(cat "$devpath/idProduct")"
+                serial_port_map["${hex_vendor}:${hex_product}"]="/dev/$devname"
+                break
+            fi
+            devpath=$(dirname "$devpath")
+        done
+    done
+fi
 
 # Function to get speed color
 get_speed_color() {
@@ -77,6 +127,15 @@ get_speed_color() {
     fi
     echo "$speed_color"
 }
+
+# Display serial ports header if any found
+if [[ ${#serial_ports[@]} -gt 0 ]]; then
+    printf "${CYAN}Serial Ports:${NC}\n"
+    for cudev in "${serial_ports[@]}"; do
+        printf "  ${CYAN}%s${NC}\n" "$cudev"
+    done
+    echo
+fi
 
 # Output table header
 printf "%s\n" "$(printf '%.0s-' {1..110})"
@@ -194,6 +253,12 @@ for ((i=0; i<device_count; i++)); do
     # Color by speed
     speed_color=$(get_speed_color "$speed")
 
+    # Check for serial port mapping
+    # Normalize IDs to lowercase for matching
+    norm_vend=$(echo "$vend_id" | tr '[:upper:]' '[:lower:]')
+    norm_prod=$(echo "$prod_id" | tr '[:upper:]' '[:lower:]')
+    serial_dev="${serial_port_map["${norm_vend}:${norm_prod}"]:-}"
+
     # Build indent string - start tree chars from left
     if [[ $adjusted_indent -gt 0 ]]; then
         if [[ $adjusted_indent -eq 1 ]]; then
@@ -230,8 +295,14 @@ for ((i=0; i<device_count; i++)); do
         device_col+=$(printf '%*s' $padding '')
     fi
 
-    printf "%s | %-10s | %-10s | %-15s | ${speed_color}%-15s${NC}\n" \
-        "$device_col" "$prod_id" "$vend_id" "$display_vend" "$speed"
+    # Append serial port if mapped
+    serial_suffix=""
+    if [[ -n "$serial_dev" ]]; then
+        serial_suffix=" ${CYAN}${serial_dev}${NC}"
+    fi
+
+    printf "%s | %-10s | %-10s | %-15s | ${speed_color}%-15s${NC}%b\n" \
+        "$device_col" "$prod_id" "$vend_id" "$display_vend" "$speed" "$serial_suffix"
 done
 
 else
@@ -352,7 +423,7 @@ else
             
             # Color by speed
             speed_color=$(get_speed_color "$speed")
-            
+
             # Build device column with manual padding for correct alignment
             device_col="$indent_str$display_device"
             device_display_len=$((indent_display_width + ${#display_device}))
@@ -360,9 +431,18 @@ else
             if [[ $padding -gt 0 ]]; then
                 device_col+=$(printf '%*s' $padding '')
             fi
-            
-            printf "%s | %-10s | %-10s | %-15s | ${speed_color}%-15s${NC}\n" \
-                "$device_col" "$prod_id" "$vend_id" "$display_vend" "$speed_display"
+
+            # Check for serial port mapping
+            norm_vend=$(echo "$vend_id" | tr '[:upper:]' '[:lower:]')
+            norm_prod=$(echo "$prod_id" | tr '[:upper:]' '[:lower:]')
+            serial_dev="${serial_port_map["${norm_vend}:${norm_prod}"]:-}"
+            serial_suffix=""
+            if [[ -n "$serial_dev" ]]; then
+                serial_suffix=" ${CYAN}${serial_dev}${NC}"
+            fi
+
+            printf "%s | %-10s | %-10s | %-15s | ${speed_color}%-15s${NC}%b\n" \
+                "$device_col" "$prod_id" "$vend_id" "$display_vend" "$speed_display" "$serial_suffix"
         fi
     done < <(/usr/bin/lsusb 2>/dev/null)
 fi
