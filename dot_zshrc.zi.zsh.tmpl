@@ -1,3 +1,25 @@
+{{ if eq .profile "tiny" -}}
+# Tiny profile — no zi manager. Only zsh-autosuggestions (history autocomplete).
+_asug_dir="$HOME/.zsh/zsh-autosuggestions"
+if [[ ! -f "$_asug_dir/zsh-autosuggestions.zsh" ]]; then
+  if command -v git &>/dev/null; then
+    _asug_lock="$HOME/.zsh/asug.install.lock"
+    mkdir -p "$HOME/.zsh"
+    if mkdir "$_asug_lock" 2>/dev/null; then
+      GIT_TERMINAL_PROMPT=0 git clone --depth 1 https://github.com/zsh-users/zsh-autosuggestions "$_asug_dir" 2>/dev/null
+      rmdir "$_asug_lock" 2>/dev/null
+    else
+      for _asug_wait in {1..30}; do
+        [[ -f "$_asug_dir/zsh-autosuggestions.zsh" ]] && break
+        sleep 1
+      done
+    fi
+    unset _asug_lock _asug_wait
+  fi
+fi
+[[ -f "$_asug_dir/zsh-autosuggestions.zsh" ]] && source "$_asug_dir/zsh-autosuggestions.zsh"
+unset _asug_dir
+{{ else -}}
 # Zi plugin manager — auto-installs if git available
 if [[ ! -f "$HOME/.zi/bin/zi.zsh" ]]; then
   if command -v git &>/dev/null; then
@@ -33,4 +55,5 @@ zi light alexrochas/zsh-extract
 zi light alexrochas/zsh-vim-crtl-z
 zi light alexrochas/zsh-git-semantic-commits
 zi light alexrochas/zsh-path-environment-explorer
+{{ end -}}
 {{ end -}}
