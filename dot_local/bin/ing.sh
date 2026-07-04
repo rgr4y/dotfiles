@@ -11,20 +11,29 @@ GITHUB_USERNAME=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --auto) AUTO=1; shift ;;
-    --lite) PROFILE="bare"; shift ;;
+    --tiny) PROFILE="tiny"; shift ;;
+    --lite) PROFILE="lite"; shift ;;
     --full) PROFILE="full"; shift ;;
     --user) [[ $# -lt 2 ]] && { echo "[ing] --user requires an argument"; exit 1; }
             GITHUB_USERNAME="$2"; shift 2 ;;
     -h|--help)
-      echo "Usage: ing.sh [--auto] [--lite|--full] [--user NAME]"
+      echo "Usage: ing.sh [--auto] [--tiny|--lite|--full] [--user NAME]"
       echo "  --auto   Non-interactive (no prompts, uses defaults)"
-      echo "  --lite   Minimal profile (fewer plugins/extras)"
-      echo "  --full   Full profile (default in interactive mode)"
+      echo "  --tiny   Embedded profile (no zi, no tmux, no extras)"
+      echo "  --lite   Lightweight profile (zi core plugins, no tmux)"
+      echo "  --full   Full profile (everything; default in interactive mode)"
       echo "  --user   GitHub username (default: ${DEFAULT_GITHUB_USERNAME})"
       exit 0 ;;
     *) echo "[ing] unknown flag: $1"; exit 1 ;;
   esac
 done
+
+# ── Detect constrained hardware (armv6/armv7, opkg routers) → default tiny ──
+IS_TINY=0
+case "$(uname -m 2>/dev/null)" in
+  armv6*|armv7*|armhf) IS_TINY=1 ;;
+esac
+command -v opkg &>/dev/null && IS_TINY=1
 
 # ── Detect system capabilities (once, up front) ─────────────────────────────
 CAN_INSTALL=0
@@ -71,7 +80,9 @@ echo "[ing] system: pm=${PM:-none} sudo=${CAN_INSTALL}"
 # ── Prompts (skipped in --auto) ──────────────────────────────────────────────
 if [[ "$AUTO" -eq 1 ]]; then
   GITHUB_USERNAME="${GITHUB_USERNAME:-$DEFAULT_GITHUB_USERNAME}"
-  PROFILE="${PROFILE:-full}"
+  if [[ -z "$PROFILE" ]]; then
+    [[ $IS_TINY -eq 1 ]] && PROFILE="tiny" || PROFILE="full"
+  fi
 else
   if [[ -z "$GITHUB_USERNAME" ]]; then
     if [ -t 0 ] && [ -r /dev/tty ]; then
@@ -83,19 +94,24 @@ else
 
   if [[ -z "$PROFILE" ]]; then
     _choice=""
+    # Preselect tiny on constrained hardware, else full
+    if [[ $IS_TINY -eq 1 ]]; then _default_choice=1; _default_name=tiny
+    else _default_choice=3; _default_name=full; fi
     if [ -t 0 ] && [ -r /dev/tty ]; then
       {
         echo "[ing] Choose your setup:"
-        echo "  1) Full (Recommended) — everything enabled"
-        echo "  2) Lite — minimal plugins and extras"
-        printf "[ing] Enter 1 or 2 (default: full in 10s): "
+        echo "  1) Tiny — embedded: no zi, no tmux, no extras"
+        echo "  2) Lite — zi core plugins, no tmux"
+        echo "  3) Full — everything (recommended for capable systems)"
+        printf "[ing] Enter 1-3 (default: %s in 10s): " "$_default_name"
       } > /dev/tty
-      read -r -t 10 _choice < /dev/tty || printf '\n[ing] timed out — defaulting to full\n' > /dev/tty
+      read -r -t 10 _choice < /dev/tty || printf '\n[ing] timed out — defaulting to %s\n' "$_default_name" > /dev/tty
     fi
-    case "${_choice:-1}" in
-      1|full|FULL|Full) PROFILE="full" ;;
-      2|lite|LITE|Lite|bare|BARE|Bare) PROFILE="bare" ;;
-      *) PROFILE="full" ;;
+    case "${_choice:-$_default_choice}" in
+      1|tiny|TINY|Tiny|bare|BARE|Bare) PROFILE="tiny" ;;
+      2|lite|LITE|Lite) PROFILE="lite" ;;
+      3|full|FULL|Full) PROFILE="full" ;;
+      *) PROFILE="$_default_name" ;;
     esac
   fi
 fi

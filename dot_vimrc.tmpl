@@ -18,8 +18,8 @@ set background=dark
 
 " Modern vim settings
 set hidden
-set signcolumn=yes
 set updatetime=300
+if exists('+signcolumn') | set signcolumn=yes | endif
 
 autocmd filetype crontab setlocal nobackup nowritebackup
 autocmd FileType python,yaml setlocal autoindent smartindent
@@ -106,8 +106,10 @@ hi StatusLineNC ctermfg=240  ctermbg=235 cterm=NONE guifg=#3e4452 guibg=#282c34
 " File handling
 set nobackup
 set noswapfile
-set undofile
-set undodir=~/.vim/undodir
+if has('persistent_undo')
+    set undofile
+    set undodir=~/.vim/undodir
+endif
 
 " Searching
 set hlsearch
@@ -131,8 +133,8 @@ Plug 'tpope/vim-surround'
 Plug 'tpope/vim-repeat'
 Plug 'tpope/vim-commentary'
 
-{{ if eq .profile "bare" -}}
-" ── Bare: lightweight linting ───────────────
+{{ if ne .profile "tiny" -}}
+" ── Lite/Full: lightweight linting ──────────
 Plug 'dense-analysis/ale'
 {{ end -}}
 
@@ -169,7 +171,6 @@ Plug 'chrisbra/vim-zsh'
 Plug 'StanAngeloff/php.vim'
 
 " ── Full: Code Intelligence ─────────────────
-Plug 'dense-analysis/ale'
 Plug 'pechorin/any-jump.vim'
 
 " ── Full: File Management ───────────────────
@@ -225,6 +226,6 @@ tnoremap <Esc> <C-\><C-n>
 {{ end -}}
 
 " Create undodir if needed
-if !isdirectory($HOME."/.vim/undodir")
+if has('persistent_undo') && !isdirectory($HOME."/.vim/undodir")
     call mkdir($HOME."/.vim/undodir", "p", 0700)
 endif

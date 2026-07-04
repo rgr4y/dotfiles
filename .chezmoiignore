@@ -13,13 +13,13 @@ docs/**
 README.md
 .gitignore
 
-# Ignore vim CoC settings on bare profile
-{{ if eq .profile "bare" }}
+# CoC settings only on full profile (needs node)
+{{ if ne .profile "full" }}
 .vim/coc-settings.json
 {{ end }}
 
-# Ignore tmux config if tmux module not selected
-{{ if not .modules.tmux }}
+# tmux only on full profile
+{{ if ne .profile "full" }}
 .tmux.conf
 .tmux/**
 {{ end }}
@@ -35,9 +35,10 @@ README.md
 .local/bin/dysk-linux.aarch64
 {{ end }}
 
-# Tiny embedded (armv6/armv7) — strip plugin/eyecandy files
+# Tiny embedded (armv6/armv7) — strip eyecandy/node files
+# NOTE: .zshrc.zi.zsh is NOT stripped here — the tiny profile already
+# reduces it to a direct zsh-autosuggestions source (no zi manager).
 {{ if eq .chezmoi.arch "arm" }}
-.zshrc.zi.zsh
 .zshrc.nvm.zsh
 .neofetch
 .vim/coc-settings.json

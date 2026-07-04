@@ -3,10 +3,10 @@ set -euo pipefail
 
 # ──────────────────────────────────────────────
 # Linux package installer — called by install.sh
-# Usage: install.linux.sh [full]
+# Usage: install.linux.sh [tiny|lite|full]  (only "full" adds FULL_PKGS)
 # ──────────────────────────────────────────────
 
-INSTALL_FULL="${1:-bare}"
+INSTALL_FULL="${1:-lite}"
 
 _log() { echo "  [debug] $*"; }
 

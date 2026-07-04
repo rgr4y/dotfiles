@@ -1,4 +1,4 @@
-profile: bare
+profile: lite
 modules:
   nvm: false
   pyenv: false
