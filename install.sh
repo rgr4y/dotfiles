@@ -8,6 +8,12 @@ set -euo pipefail
 
 CHEZMOI_REPO="https://github.com/rgr4y/dotfiles.git"
 CHEZMOI_BIN_DIR="$HOME/.local/bin"
+# chezmoi is a ~CHEZMOI_SIZE_MB MB static binary. On cramped embedded rootfs the
+# default target ($HOME/.local/bin) may be near-full — if the *real* backing fs
+# (symlinks resolved) has < LOW_DISK_MB free, ask where to put it (roomy data
+# mount, global if root/sudo, or ephemeral /tmp).
+LOW_DISK_MB="${LOW_DISK_MB:-50}"
+CHEZMOI_SIZE_MB="${CHEZMOI_SIZE_MB:-20}"
 ZI_HOME="$HOME/.zi"
 PLUG_VIM="$HOME/.vim/autoload/plug.vim"
 DATA_FILE=""  # set after chezmoi source-path is known
@@ -154,93 +160,160 @@ _chezmoi_download() {
   sh -c "$(_curl -fsLS get.chezmoi.io)" -- -b "$dest"
 }
 
-_select_chezmoi_dir() {
-  # On tiny/embedded systems, $HOME/.local/bin may be on a cramped rootfs.
-  # Discover writable mounts with space and let the user choose.
-  if [[ $IS_TINY -eq 0 ]]; then
-    echo "$HOME/.local/bin"
-    return
+# Canonical path with symlinks resolved (so a symlinked bin dir measures its
+# REAL backing fs). Falls back gracefully where readlink -f / realpath are absent.
+_resolve() {
+  local p="$1"
+  if readlink -f "$p" >/dev/null 2>&1; then readlink -f "$p"
+  elif command -v realpath >/dev/null 2>&1; then realpath "$p" 2>/dev/null || echo "$p"
+  else echo "$p"; fi
+}
+
+# Free MB on the fs backing $1, symlinks resolved; walks up if the path is absent.
+_avail_mb() {
+  local p; p="$(_resolve "$1")"
+  while [[ -n "$p" && ! -e "$p" ]]; do
+    [[ "$p" != */* ]] && { p="/"; break; }
+    p="${p%/*}"; [[ -z "$p" ]] && p="/"
+  done
+  df -m "$p" 2>/dev/null | awk 'NR==2{print $4}'
+}
+
+# True if the binary can be created in $1 directly (dir or parent writable),
+# following symlinks.
+_can_write() {
+  local d; d="$(_resolve "$1")"
+  local parent
+  [[ -d "$d" && -w "$d" ]] && return 0
+  parent="${d%/*}"; [[ -z "$parent" ]] && parent="/"
+  [[ -d "$parent" && -w "$parent" ]]
+}
+
+# Download chezmoi into $CHEZMOI_BIN_DIR. If $1 (use_sudo) is set, stage in a
+# writable temp then install with sudo (for global dirs we can't write directly).
+_place_chezmoi() {
+  local use_sudo="$1" stage
+  if [[ -n "$use_sudo" ]]; then
+    stage="$(mktemp -d)"
+    _chezmoi_download "$stage"
+    $use_sudo install -m 0755 "$stage/chezmoi" "$CHEZMOI_BIN_DIR/chezmoi"
+    rm -rf "$stage"
+  else
+    _chezmoi_download "$CHEZMOI_BIN_DIR"
   fi
+}
 
-  local -a candidates=()
-  local -a labels=()
+# Ask where to install chezmoi. Silent default on roomy single-disk machines;
+# prompts when the box is embedded, the real backing fs is tight, or more than
+# one viable location exists. All space/writability checks resolve symlinks.
+_select_chezmoi_dir() {
   local default_dir="$HOME/.local/bin"
+  local default_avail; default_avail="$(_avail_mb "$default_dir")"
+  local euid="${EUID:-$(id -u)}"
 
-  # Always include the default
-  candidates+=("$default_dir")
-  local default_avail
-  default_avail=$(df -m "$HOME" 2>/dev/null | awk 'NR==2{print $4}')
-  labels+=("$default_dir (${default_avail:-?}MB free)")
+  local -a dirs=() labels=()
 
-  # Probe common writable locations on embedded systems
-  local dir
-  for dir in /userdata /opt /tmp /mnt/data; do
-    [[ -d "$dir" && -w "$dir" ]] || continue
-    local cand="$dir/.local/bin"
-    [[ "$cand" == "$default_dir" ]] && continue
-    local avail
-    avail=$(df -m "$dir" 2>/dev/null | awk 'NR==2{print $4}')
-    [[ -z "$avail" || "$avail" -lt 20 ]] && continue
-    candidates+=("$cand")
-    labels+=("$cand (${avail}MB free)")
+  # 1. default home (persistent) — space measured on its resolved fs
+  dirs+=("$default_dir"); labels+=("$default_dir  (${default_avail:-?}MB, persistent)")
+
+  # 2. roomy persistent data mounts (only if they hold >= 2x the binary)
+  local m a cand
+  for m in /userdata /mnt/data /mnt/sda /mnt/sdcard /data /opt; do
+    { [[ -d "$m" ]] && _can_write "$m"; } || continue
+    cand="$m/.local/bin"
+    [[ "$(_resolve "$cand")" == "$(_resolve "$default_dir")" ]] && continue
+    a="$(_avail_mb "$m")"
+    [[ -z "$a" || "$a" -lt $((CHEZMOI_SIZE_MB * 2)) ]] && continue
+    dirs+=("$cand"); labels+=("$cand  (${a}MB, persistent)")
   done
 
-  if [[ ${#candidates[@]} -le 1 ]]; then
+  # 3. GLOBAL install if root or sudo — shared, keeps the cramped home fs clean
+  if [[ "$euid" -eq 0 || $HAS_SUDO -eq 1 ]]; then
+    local g note; note="global"; [[ "$euid" -ne 0 ]] && note="global, sudo"
+    for g in /usr/local/bin /opt/bin /usr/bin; do
+      [[ -d "$g" ]] || continue
+      a="$(_avail_mb "$g")"
+      dirs+=("$g"); labels+=("$g  (${a:-?}MB, ${note})")
+    done
+  fi
+
+  # 4. /tmp — ephemeral tmpfs (RAM), gone on reboot, but free on embedded boxes
+  if [[ -d /tmp ]] && _can_write /tmp; then
+    a="$(_avail_mb /tmp)"
+    dirs+=("/tmp/.local/bin"); labels+=("/tmp/.local/bin  (${a:-?}MB, ${YELLOW}EPHEMERAL — lost on reboot${RESET})")
+  fi
+
+  # Silent default: roomy, not embedded, and nowhere better to offer.
+  if [[ ${#dirs[@]} -le 1 || ( $IS_TINY -eq 0 && -n "$default_avail" && "$default_avail" -ge "$LOW_DISK_MB" ) ]]; then
     echo "$default_dir"
     return
   fi
 
-  # Pick the candidate with most space as default selection
-  local best=0 best_avail=0
-  for ((i = 0; i < ${#candidates[@]}; i++)); do
-    local dir_check="${candidates[$i]%/.local/bin}"
-    [[ -z "$dir_check" ]] && dir_check="/"
-    local avail
-    avail=$(df -m "$dir_check" 2>/dev/null | awk 'NR==2{print $4}')
-    if [[ -n "$avail" && "$avail" -gt "$best_avail" ]]; then
-      best=$i
-      best_avail=$avail
+  {
+    echo
+    if [[ -n "$default_avail" && "$default_avail" -lt "$LOW_DISK_MB" ]]; then
+      echo "${YELLOW}⚠ Low disk:${RESET} ${default_dir} has ${default_avail}MB free (chezmoi ~${CHEZMOI_SIZE_MB}MB)."
     fi
-  done
+    echo "${BOLD}Install chezmoi to:${RESET}"
+    echo "${DIM}(↑/↓ to move, Enter to select)${RESET}"
+    echo
+  } >&2
 
-  local selected=$best
-  echo
-  echo "${BOLD}Install chezmoi to:${RESET}"
-  echo "${DIM}(↑/↓ to move, Enter to select)${RESET}"
-  echo
+  # Default highlight = most free space among persistent (non-/tmp) options.
+  local selected=0 best_avail=0 i d
+  for ((i = 0; i < ${#dirs[@]}; i++)); do
+    d="${dirs[$i]}"; [[ "$d" == /tmp/* ]] && continue
+    a="$(_avail_mb "$d")"
+    if [[ -n "$a" && "$a" -gt "$best_avail" ]]; then best_avail="$a"; selected="$i"; fi
+  done
 
   _tput civis
   while true; do
-    for ((i = 0; i < ${#candidates[@]}; i++)); do
+    for ((i = 0; i < ${#dirs[@]}; i++)); do
       if [[ $i -eq $selected ]]; then
-        echo -e "\r  ${GREEN}▸ ${labels[$i]}${RESET}   "
+        echo -e "\r  ${GREEN}▸ ${labels[$i]}${RESET}   " >&2
       else
-        echo -e "\r    ${labels[$i]}   "
+        echo -e "\r    ${labels[$i]}   " >&2
       fi
     done
-
     IFS= read -rsn1 key
     case "$key" in
-      A|k) ((selected > 0)) && ((selected--)) ;;
-      B|j) ((selected < ${#candidates[@]} - 1)) && ((selected++)) ;;
+      A|k) [[ $selected -gt 0 ]] && selected=$((selected - 1)) ;;
+      B|j) [[ $selected -lt $((${#dirs[@]} - 1)) ]] && selected=$((selected + 1)) ;;
       "")  break ;;
     esac
-    printf "\033[%dA" "${#candidates[@]}"
+    printf "\033[%dA" "${#dirs[@]}" >&2
   done
   _tput cnorm
-  echo
+  echo >&2
 
-  echo "${candidates[$selected]}"
+  echo "${dirs[$selected]}"
 }
 
 install_chezmoi() {
   CHEZMOI_BIN_DIR="$(_select_chezmoi_dir)"
-  mkdir -p "$CHEZMOI_BIN_DIR"
+
+  # Global dirs may not be writable directly — use sudo to place the binary.
+  local use_sudo=""
+  if ! _can_write "$CHEZMOI_BIN_DIR"; then
+    if [[ "${EUID:-$(id -u)}" -ne 0 && $HAS_SUDO -eq 1 ]]; then
+      use_sudo="sudo"
+    else
+      echo "⚠ $CHEZMOI_BIN_DIR not writable and no sudo — using \$HOME/.local/bin instead."
+      CHEZMOI_BIN_DIR="$HOME/.local/bin"
+    fi
+  fi
+
+  $use_sudo mkdir -p "$CHEZMOI_BIN_DIR"
   export PATH="$CHEZMOI_BIN_DIR:$PATH"
+
+  case "$CHEZMOI_BIN_DIR" in
+    /tmp/*) echo "${YELLOW}⚠ chezmoi in /tmp is EPHEMERAL — re-run this bootstrap after a reboot.${RESET}" ;;
+  esac
 
   if ! command -v chezmoi &>/dev/null; then
     echo "Installing chezmoi to $CHEZMOI_BIN_DIR..."
-    _chezmoi_download "$CHEZMOI_BIN_DIR"
+    _place_chezmoi "$use_sudo"
     echo "✓ chezmoi installed"
     return
   fi
@@ -257,7 +330,7 @@ install_chezmoi() {
           | grep -o '"tag_name": *"[^"]*"' | head -1 | grep -o 'v[0-9][0-9.]*')"
   if [[ -n "$_lat" && "$_cur" != "$_lat" ]]; then
     echo "chezmoi ${_cur} → ${_lat} — upgrading..."
-    _chezmoi_download "$CHEZMOI_BIN_DIR"
+    _place_chezmoi "$use_sudo"
     echo "✓ chezmoi upgraded"
   else
     echo "✓ chezmoi ${_cur:-unknown} is latest"
