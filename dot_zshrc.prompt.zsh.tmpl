@@ -141,4 +141,10 @@ ${smiley} ${suffix} "
   RPROMPT=""
 }
 
-precmd_functions+=build_prompt
+# Register via add-zsh-hook (declares precmd_functions as an array). A raw
+# `precmd_functions+=build_prompt` creates a SCALAR when nothing has declared
+# the array yet (e.g. no plugin manager loaded first) — zsh's precmd machinery
+# only iterates the array form, so the hook silently never fires and you get
+# the default %m%# prompt. add-zsh-hook is bulletproof regardless of load order.
+typeset -ga precmd_functions
+add-zsh-hook precmd build_prompt
