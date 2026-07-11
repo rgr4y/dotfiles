@@ -2,9 +2,10 @@
 # Custom Prompt
 # ──────────────────────────────────────────────
 
-# Cache hostname + user once
-: ${__ZP_HOST:=$(hostname -s)}
-: ${__ZP_USER:=${USER:-$(whoami)}}
+# Cache hostname + user once. Embedded boxes (busybox, minimal images) may lack
+# a `hostname` binary — fall back to uname -n, then $HOST, then a literal.
+: ${__ZP_HOST:=$(hostname -s 2>/dev/null || hostname 2>/dev/null || uname -n 2>/dev/null || print -r -- "${HOST:-localhost}")}
+: ${__ZP_USER:=${USER:-$(whoami 2>/dev/null || print -r -- "${LOGNAME:-user}")}}
 
 # Colors
 local _n='%f' _dim='%F{245}'
@@ -33,7 +34,9 @@ fmt_dur() {
   fi
 }
 
-# Git (fast, cached)
+{{- if ne .profile "bare" }}
+# Git (fast, cached) — omitted on bare/embedded (git often absent, saves a fork
+# per prompt on slow SoCs).
 typeset -gA __ZP_GIT_CACHE_MTIME __ZP_GIT_CACHE_STR
 
 __zp_find_git_dir() {
@@ -75,6 +78,7 @@ git_segment() {
   __ZP_GIT_CACHE_STR[$key]="$seg"
   print -r -- "$seg"
 }
+{{- end }}
 
 # Tags
 venv_tag() { [[ -n $VIRTUAL_ENV ]] && print -r -- "${_c_tag}(${${VIRTUAL_ENV:t}})${_n}"; }
@@ -126,8 +130,10 @@ build_prompt() {
   [[ $__ZP_USER != "rob" ]] && host_part="%F{cyan}${__ZP_USER}@%f${host_part}"
 
   local left="${host_part} ${cwd_color}$(short_pwd)${_n}"
+{{- if ne .profile "bare" }}
   local git="$(git_segment)"
   [[ -n $git ]] && left+=" ${git}"
+{{- end }}
 
   local -a parts
   local p

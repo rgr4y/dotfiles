@@ -213,7 +213,7 @@ fi
 {{ end -}}
 
 [[ -f "$HOME/.zshrc.prompt.zsh" ]] && source "$HOME/.zshrc.prompt.zsh"
-{{- if ne .chezmoi.arch "arm" }}
+{{- if ne .profile "bare" }}
 [[ -f "$HOME/.neofetch" ]] && cat "$HOME/.neofetch"
 {{- end }}
 [[ -f "$HOME/.zshrc.aliases.zsh" ]] && source "$HOME/.zshrc.aliases.zsh"

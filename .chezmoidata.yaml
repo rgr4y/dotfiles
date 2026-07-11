@@ -1,4 +1,5 @@
 profile: lite
+lowpower: false
 modules:
   nvm: false
   pyenv: false

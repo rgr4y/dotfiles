@@ -1,24 +1,30 @@
-{{ if eq .profile "tiny" -}}
-# Tiny profile — no zi manager. Only zsh-autosuggestions (history autocomplete).
-_asug_dir="$HOME/.zsh/zsh-autosuggestions"
-if [[ ! -f "$_asug_dir/zsh-autosuggestions.zsh" ]]; then
-  if command -v git &>/dev/null; then
-    _asug_lock="$HOME/.zsh/asug.install.lock"
-    mkdir -p "$HOME/.zsh"
-    if mkdir "$_asug_lock" 2>/dev/null; then
-      GIT_TERMINAL_PROMPT=0 git clone --depth 1 https://github.com/zsh-users/zsh-autosuggestions "$_asug_dir" 2>/dev/null
-      rmdir "$_asug_lock" 2>/dev/null
-    else
-      for _asug_wait in {1..30}; do
-        [[ -f "$_asug_dir/zsh-autosuggestions.zsh" ]] && break
-        sleep 1
-      done
+{{ if eq .profile "bare" -}}
+# Bare profile — NO zi manager (too heavy for embedded). Just clone the two
+# plugins we actually want directly with git and source their files by hand:
+#   zsh-autosuggestions      (history autocomplete)
+#   zsh-syntax-highlighting  (command coloring) — MUST be sourced last
+# A per-dir lock lets concurrent shells cooperate on first-run clone.
+_zp_clone_source() {
+  # $1 = install dir, $2 = repo url, $3 = file to source once present
+  local dir="$1" url="$2" file="$3" lock="$1.lock" i
+  if [[ ! -f "$dir/$file" ]]; then
+    if command -v git &>/dev/null; then
+      mkdir -p "${dir:h}"
+      if mkdir "$lock" 2>/dev/null; then
+        GIT_TERMINAL_PROMPT=0 git clone --depth 1 "$url" "$dir" 2>/dev/null
+        rmdir "$lock" 2>/dev/null
+      else
+        for i in {1..30}; do [[ -f "$dir/$file" ]] && break; sleep 1; done
+      fi
     fi
-    unset _asug_lock _asug_wait
   fi
-fi
-[[ -f "$_asug_dir/zsh-autosuggestions.zsh" ]] && source "$_asug_dir/zsh-autosuggestions.zsh"
-unset _asug_dir
+  [[ -f "$dir/$file" ]] && source "$dir/$file"
+}
+_zp_clone_source "$HOME/.zsh/zsh-autosuggestions" \
+  https://github.com/zsh-users/zsh-autosuggestions zsh-autosuggestions.zsh
+_zp_clone_source "$HOME/.zsh/zsh-syntax-highlighting" \
+  https://github.com/zsh-users/zsh-syntax-highlighting zsh-syntax-highlighting.zsh
+unset -f _zp_clone_source
 {{ else -}}
 # Zi plugin manager — auto-installs if git available
 if [[ ! -f "$HOME/.zi/bin/zi.zsh" ]]; then

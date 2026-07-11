@@ -3,7 +3,7 @@ set -euo pipefail
 
 # ──────────────────────────────────────────────
 # Linux package installer — called by install.sh
-# Usage: install.linux.sh [tiny|lite|full]  (only "full" adds FULL_PKGS)
+# Usage: install.linux.sh [bare|lite|full]  (only "full" adds FULL_PKGS)
 # ──────────────────────────────────────────────
 
 INSTALL_FULL="${1:-lite}"
@@ -90,6 +90,83 @@ _pkg_installed() {
     pacman) pacman -Qi "$1" &>/dev/null ;;
   esac
 }
+
+# ──────────────────────────────────────────────
+# Bare — ordered, space-checked, minimal install (apk + apt)
+# ──────────────────────────────────────────────
+# Re-checks free space before EACH package and STOPS (logging skips) if it drops
+# below the floor. No broot/eza/bat — just a comfy shell. Self-contained (inline
+# feed update) so it has no ordering dependency on the apt helpers below.
+# -k (1K blocks) is portable across busybox/GNU df; -m is not always present.
+_bare_free_mb() { df -k / 2>/dev/null | awk 'NR==2{print int($4/1024)}'; }
+_bare_pkg_exists() {
+  case "$PM" in
+    apk) apk search -q -e "$1" 2>/dev/null | grep -q "^$1$" ;;
+    apt) apt-cache show "$1" &>/dev/null ;;
+    *)   return 0 ;;  # yum/pacman: let the install attempt decide
+  esac
+}
+_bare_install_one() {
+  case "$PM" in
+    apk) $SUDO apk add --no-cache "$1" ;;
+    apt) $SUDO env DEBIAN_FRONTEND=noninteractive apt-get install --no-install-recommends -y "$1" ;;
+    *)   $INSTALL "$1" ;;
+  esac
+}
+
+_install_bare() {
+  local FLOOR_MB="${BARE_FLOOR_MB:-20}"
+  echo "Updating package feeds..."
+  case "$PM" in
+    apk) $SUDO apk update 2>/dev/null || true ;;
+    apt) $SUDO apt-get update -qq 2>/dev/null || true ;;
+  esac
+
+  # Ordered essentials. "<bin> <candidate pkgs...>" — first available wins.
+  # git before the rest (chezmoi plugin clones need it). vim-tiny preferred where
+  # it exists (Debian); nc is usually busybox/absent-and-optional.
+  local -a ORDER=(
+    "zsh   zsh"
+    "git   git"
+    "vim   vim-tiny vim"
+    "bash  bash"
+    "curl  curl"
+    "nc    netcat-openbsd netcat ncat"
+    "htop  htop"
+  )
+
+  local -a SKIPPED=()
+  local stopped=0 line bin cands pkg free installed
+  for line in "${ORDER[@]}"; do
+    read -r bin cands <<<"$line"
+    if command -v "$bin" &>/dev/null; then echo "  ✓ $bin already present"; continue; fi
+    if [[ $stopped -eq 1 ]]; then SKIPPED+=("$bin"); continue; fi
+
+    free="$(_bare_free_mb)"
+    if [[ -n "$free" && "$free" -lt "$FLOOR_MB" ]]; then
+      echo "  ⚠ ${free}MB free < ${FLOOR_MB}MB floor — STOPPING; skipping rest"
+      stopped=1; SKIPPED+=("$bin"); continue
+    fi
+
+    installed=0
+    for pkg in $cands; do
+      if _bare_pkg_exists "$pkg"; then
+        echo "  → $pkg (${free}MB free)"
+        if _bare_install_one "$pkg" 2>&1; then installed=1; break; else echo "    ⚠ $pkg failed"; fi
+      fi
+    done
+    [[ $installed -eq 0 ]] && { echo "  ⚠ no installable pkg for '$bin' (tried: $cands) — skipped"; SKIPPED+=("$bin"); }
+  done
+
+  [[ ${#SKIPPED[@]} -gt 0 ]] && echo "⚠ bare install skipped: ${SKIPPED[*]}"
+  echo "✓ bare packages done"
+}
+
+# Bare profile: minimal path, then done (no generic pkg list, no broot/binaries).
+if [[ "$INSTALL_FULL" == "bare" ]]; then
+  _install_bare
+  exit 0
+fi
 
 # Restore cached apt lists or run apt-get update, then save lists after
 _apt_update() {

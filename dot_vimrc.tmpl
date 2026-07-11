@@ -1,5 +1,11 @@
 " Basic
+{{- if eq .profile "bare" }}
+" bare/vim-tiny has no syntax support compiled in; `syntax on` throws E319.
+" `silent!` swallows it so a stripped vim never errors on startup.
+silent! syntax on
+{{- else }}
 syntax on
+{{- end }}
 set ruler
 set nu
 set clipboard=

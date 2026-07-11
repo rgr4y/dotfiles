@@ -12,7 +12,7 @@ CHEZMOI_BIN_DIR="$HOME/.local/bin"
 # default target ($HOME/.local/bin) may be near-full — if the *real* backing fs
 # (symlinks resolved) has < LOW_DISK_MB free, ask where to put it (roomy data
 # mount, global if root/sudo, or ephemeral /tmp).
-LOW_DISK_MB="${LOW_DISK_MB:-50}"
+LOW_DISK_MB="${LOW_DISK_MB:-128}"
 CHEZMOI_SIZE_MB="${CHEZMOI_SIZE_MB:-20}"
 ZI_HOME="$HOME/.zi"
 PLUG_VIM="$HOME/.vim/autoload/plug.vim"
@@ -34,6 +34,10 @@ if command -v sudo &>/dev/null && sudo -n true 2>/dev/null; then
   HAS_SUDO=1
 fi
 
+# Sudo prefix for package installs (empty if root or no sudo).
+SUDO=""
+if [[ "$(id -u)" -ne 0 && $HAS_SUDO -eq 1 ]]; then SUDO="sudo"; fi
+
 HAS_ZSH=0
 if command -v zsh &>/dev/null; then
   HAS_ZSH=1
@@ -44,23 +48,49 @@ if command -v brew &>/dev/null; then
   PKG_MGR="brew"
 elif command -v apt-get &>/dev/null; then
   PKG_MGR="apt"
+elif command -v apk &>/dev/null; then
+  PKG_MGR="apk"
 elif command -v opkg &>/dev/null; then
   PKG_MGR="opkg"
 fi
 
-# Detect tiny/embedded systems: opkg or 32-bit ARM (armv6l, armv7l, armhf, etc.)
-IS_TINY=0
+# ──────────────────────────────────────────────
+# Low-power / space-constrained detection
+# ──────────────────────────────────────────────
+# LOWPOWER trips on ANY of:
+#   - 32-bit ARM (armv6l/armv7l/armhf/armel) — genuinely tiny SoCs
+#   - opkg/apk package manager (OpenWrt / Alpine embedded images)
+#   - < LOWPOWER_DISK_MB free on the $HOME backing fs
+# aarch64 alone is NOT low-power (could be Graviton / Pi4 8GB / arm64 VM); it
+# only trips lowpower via opkg/apk or the disk check.
+# When LOWPOWER: the profile is HARD-FORCED to "bare" (menu skipped), chezmoi is
+# staged in /tmp and removed after apply, and .git dirs are stripped post-apply.
+LOWPOWER_DISK_MB="${LOWPOWER_DISK_MB:-128}"
 ARCH="$(uname -m)"
+LOWPOWER=0
+LOWPOWER_WHY=""
 case "$ARCH" in
-  armv[67]*|armhf) IS_TINY=1 ;;
+  armv[67]*|armhf|armel) LOWPOWER=1; LOWPOWER_WHY="arch=$ARCH" ;;
 esac
-[[ "$PKG_MGR" == "opkg" ]] && IS_TINY=1
+if [[ "$PKG_MGR" == "opkg" || "$PKG_MGR" == "apk" ]]; then
+  LOWPOWER=1; LOWPOWER_WHY="${LOWPOWER_WHY:+$LOWPOWER_WHY }pkg=$PKG_MGR"
+fi
+_home_free_mb="$(df -m "$HOME" 2>/dev/null | awk 'NR==2{print $4}')"
+if [[ -n "$_home_free_mb" && "$_home_free_mb" -lt "$LOWPOWER_DISK_MB" ]]; then
+  LOWPOWER=1; LOWPOWER_WHY="${LOWPOWER_WHY:+$LOWPOWER_WHY }disk=${_home_free_mb}MB"
+fi
+# IS_TINY kept as an alias — existing skip guards (vim-plug, nerd font, vim
+# plugins) reference it.
+IS_TINY=$LOWPOWER
 
 echo "┌─────────────────────────────────────┐"
 echo "│  Dotfiles Bootstrap                 │"
 echo "│  OS: $OS  sudo: $HAS_SUDO  zsh: $HAS_ZSH       │"
 echo "│  pkg: ${PKG_MGR:-none}                          │"
 echo "└─────────────────────────────────────┘"
+if [[ $LOWPOWER -eq 1 ]]; then
+  echo "  ⚡ low-power system ($LOWPOWER_WHY) → 'bare' profile forced"
+fi
 echo
 
 # ──────────────────────────────────────────────
@@ -103,6 +133,13 @@ RESET=$(_tput sgr0)
 GREEN=$(_tput setaf 2)
 CYAN=$(_tput setaf 6)
 YELLOW=$(_tput setaf 3)
+
+# True if a controlling terminal is reachable. Under `curl -sL … | bash` stdin is
+# the PIPE (already at EOF), so `read` returns instantly and every interactive
+# menu auto-picks its default — which is exactly why the profile menu "never
+# appeared". Menus therefore read from /dev/tty, and skip entirely when it isn't
+# reachable (true non-interactive runs: cron, CI).
+_have_tty() { { true 0</dev/tty; } 2>/dev/null; }
 
 # ──────────────────────────────────────────────
 # 2. Install dependencies
@@ -211,6 +248,9 @@ _select_chezmoi_dir() {
   local default_avail; default_avail="$(_avail_mb "$default_dir")"
   local euid="${EUID:-$(id -u)}"
 
+  # No terminal → can't prompt; use the default dir.
+  if ! _have_tty; then echo "$default_dir"; return; fi
+
   local -a dirs=() labels=()
 
   # 1. default home (persistent) — space measured on its resolved fs
@@ -276,7 +316,7 @@ _select_chezmoi_dir() {
         echo -e "\r    ${labels[$i]}   " >&2
       fi
     done
-    IFS= read -rsn1 key
+    IFS= read -rsn1 key </dev/tty
     case "$key" in
       A|k) [[ $selected -gt 0 ]] && selected=$((selected - 1)) ;;
       B|j) [[ $selected -lt $((${#dirs[@]} - 1)) ]] && selected=$((selected + 1)) ;;
@@ -291,7 +331,14 @@ _select_chezmoi_dir() {
 }
 
 install_chezmoi() {
-  CHEZMOI_BIN_DIR="$(_select_chezmoi_dir)"
+  # Low-power / <128MB free: stage chezmoi in /tmp (tmpfs). It's bootstrap-only
+  # here — cleanup_lowpower() removes it after apply. No prompt.
+  if [[ $LOWPOWER -eq 1 ]]; then
+    CHEZMOI_BIN_DIR="/tmp/.local/bin"
+    echo "${YELLOW}⚡ low-power → staging chezmoi in $CHEZMOI_BIN_DIR (ephemeral, removed after apply)${RESET}"
+  else
+    CHEZMOI_BIN_DIR="$(_select_chezmoi_dir)"
+  fi
 
   # Global dirs may not be writable directly — use sudo to place the binary.
   local use_sudo=""
@@ -368,44 +415,63 @@ install_vim_plug() {
 }
 
 install_packages_opkg() {
-  # Minimal packages for embedded/OpenWrt systems
-  # Check available space first — need at least 2MB free on root overlay
-  local avail_kb
-  avail_kb=$(df /overlay 2>/dev/null | awk 'NR==2{print $4}' || df / | awk 'NR==2{print $4}')
-  if [[ -n "$avail_kb" && "$avail_kb" -lt 2048 ]]; then
-    echo "⚠ Only ${avail_kb}KB free — need 2MB minimum for packages. Skipping."
+  # Minimal, SPACE-CHECKED, incremental install for embedded/OpenWrt (opkg).
+  # Space is re-checked before EACH package; if we drop below the floor we STOP
+  # and log everything skipped (never silently truncate).
+  local FLOOR_KB="${OPKG_FLOOR_KB:-2048}"   # 2MB minimum free on root overlay
+
+  _opkg_free_kb() { df /overlay 2>/dev/null | awk 'NR==2{print $4}' || df / 2>/dev/null | awk 'NR==2{print $4}'; }
+  _opkg_pkg_exists() { opkg list "$1" 2>/dev/null | grep -q "^$1 "; }
+
+  local avail_kb; avail_kb="$(_opkg_free_kb)"
+  if [[ -n "$avail_kb" && "$avail_kb" -lt "$FLOOR_KB" ]]; then
+    echo "⚠ Only ${avail_kb}KB free — need $((FLOOR_KB/1024))MB minimum. Skipping packages."
     return
   fi
   echo "Space available: ${avail_kb}KB"
-
-  # Bare essentials only — these are tiny systems
-  local -a PKGS=(vim-full git-http zsh curl wget rsync htop)
-
-  local -a MISSING=()
-  for pkg in "${PKGS[@]}"; do
-    local bin="$pkg"
-    case "$pkg" in
-      vim-full) bin="vim" ;;
-      git-http) bin="git" ;;
-    esac
-    if ! command -v "$bin" &>/dev/null; then
-      MISSING+=("$pkg")
-    fi
-  done
-
-  if [[ ${#MISSING[@]} -eq 0 ]]; then
-    echo "✓ All essential packages already installed"
-    return
-  fi
-
   echo "Updating opkg feeds..."
   opkg update 2>/dev/null || true
 
-  echo "Installing ${#MISSING[@]} packages: ${MISSING[*]}"
-  for pkg in "${MISSING[@]}"; do
-    echo "  → $pkg"
-    opkg install "$pkg" 2>&1 || echo "  ⚠ Failed to install $pkg (may need more space)"
+  # Ordered essentials. Each line: "<bin> <candidate pkgs...>" — first candidate
+  # that exists in the feed wins. git before vim/etc because chezmoi init + the
+  # zsh plugin clones need it. nc is usually busybox-provided (skipped as present).
+  local -a ORDER=(
+    "zsh   zsh"
+    "git   git-http git"
+    "vim   vim-tiny vim vim-full"
+    "bash  bash"
+    "curl  curl"
+    "nc    netcat"
+    "htop  htop"
+  )
+
+  local -a SKIPPED=()
+  local stopped=0 line bin cands pkg
+  for line in "${ORDER[@]}"; do
+    read -r bin cands <<<"$line"
+    if command -v "$bin" &>/dev/null; then
+      echo "  ✓ $bin already present"
+      continue
+    fi
+    if [[ $stopped -eq 1 ]]; then SKIPPED+=("$bin"); continue; fi
+
+    avail_kb="$(_opkg_free_kb)"
+    if [[ -n "$avail_kb" && "$avail_kb" -lt "$FLOOR_KB" ]]; then
+      echo "  ⚠ ${avail_kb}KB free < ${FLOOR_KB}KB floor — STOPPING; skipping rest"
+      stopped=1; SKIPPED+=("$bin"); continue
+    fi
+
+    local installed=0
+    for pkg in $cands; do
+      if _opkg_pkg_exists "$pkg"; then
+        echo "  → $pkg (${avail_kb}KB free)"
+        if opkg install "$pkg" 2>&1; then installed=1; break; else echo "    ⚠ $pkg failed"; fi
+      fi
+    done
+    [[ $installed -eq 0 ]] && { echo "  ⚠ no installable pkg for '$bin' (tried: $cands) — skipped"; SKIPPED+=("$bin"); }
   done
+
+  [[ ${#SKIPPED[@]} -gt 0 ]] && echo "⚠ opkg skipped: ${SKIPPED[*]}"
   echo "✓ opkg packages done"
 }
 
@@ -496,8 +562,89 @@ install_nerd_font() {
   echo "✓ JetBrains Mono Nerd Font installed to $FONT_DIR"
 }
 
+# ──────────────────────────────────────────────
+# bash → zsh drop-in (embedded, no chsh)
+# ──────────────────────────────────────────────
+# NOT an alias (aliases only touch the interactive shell and don't help login).
+# Appends a guarded `exec zsh -l` to ~/.bashrc + ~/.profile: fires only for an
+# interactive terminal, only if not already in zsh, only if zsh exists. Scripts
+# with #!/bin/bash are unaffected (they aren't interactive). Idempotent marker.
+install_bash_shim() {
+  command -v zsh &>/dev/null || { echo "⚠ zsh not found — skipping bash→zsh shim"; return 0; }
+  local zsh_path; zsh_path="$(command -v zsh)"
+  local marker="# >>> dotfiles bash->zsh >>>"
+  local rc
+  for rc in "$HOME/.bashrc" "$HOME/.profile"; do
+    [[ -e "$rc" ]] || touch "$rc" 2>/dev/null || continue
+    grep -qF "$marker" "$rc" 2>/dev/null && { echo "✓ bash→zsh shim already in $rc"; continue; }
+    cat >> "$rc" <<EOF
+
+$marker
+# Drop into zsh for interactive shells (embedded boxes where chsh is unavailable).
+if [ -t 1 ] && [ -z "\$ZSH_VERSION" ] && [ -x "$zsh_path" ]; then
+  exec "$zsh_path" -l
+fi
+# <<< dotfiles bash->zsh <<<
+EOF
+    echo "✓ bash→zsh shim added to $rc"
+  done
+}
+
+# ──────────────────────────────────────────────
+# Low-power post-apply cleanup — reclaim space
+# ──────────────────────────────────────────────
+# On embedded/low-power, chezmoi is bootstrap-only. After apply we drop the
+# chezmoi binary and strip .git metadata from the source repo + plugin clones
+# (the working files stay; only the reflog/objects go). Re-run the bootstrap to
+# update later.
+cleanup_lowpower() {
+  [[ $LOWPOWER -eq 1 ]] || return 0
+  echo "Low-power cleanup — reclaiming space..."
+  local src d
+  src="$(chezmoi source-path 2>/dev/null || echo "$HOME/.local/share/chezmoi")"
+  for d in "$src/.git" "$HOME"/.zsh/*/.git "$HOME/.zi"; do
+    [[ -e "$d" ]] || continue
+    rm -rf "$d" 2>/dev/null && echo "  removed $d"
+  done
+  local cm; cm="$(command -v chezmoi 2>/dev/null || true)"
+  if [[ -n "$cm" && -f "$cm" ]]; then
+    rm -f "$cm" 2>/dev/null && echo "  removed chezmoi binary ($cm)"
+  fi
+  echo "✓ cleanup done"
+}
+
+# ──────────────────────────────────────────────
+# Harden ~/.vimrc against vim-tiny
+# ──────────────────────────────────────────────
+# vim-tiny (apk/opkg minimal builds) lacks +syntax, so a bare `syntax on` throws
+# E319 on every startup. The bare vimrc template already emits `silent! syntax
+# on`, but this catches the mismatch case (e.g. profile guessed wrong, or the
+# only vim available is tiny). Actually loads the applied ~/.vimrc, and if vim
+# emits an E### error, neutralizes `syntax on/enable` by prefixing `silent!`.
+harden_vimrc() {
+  local vrc="$HOME/.vimrc"
+  command -v vim &>/dev/null || return 0
+  [[ -f "$vrc" ]] || return 0
+  local err
+  err="$(vim -es -c 'qa!' </dev/null 2>&1)"
+  echo "$err" | grep -qE 'E[0-9]+:' || { echo "✓ ~/.vimrc loads clean"; return 0; }
+  echo "⚠ vim errors loading ~/.vimrc — neutralizing bare 'syntax on':"
+  echo "$err" | grep -E 'E[0-9]+:' | head -3 | sed 's/^/    /'
+  if sed -i -r 's/^([[:space:]]*)(syntax[[:space:]]+(on|enable))([[:space:]]*)$/\1silent! \2/' "$vrc" 2>/dev/null; then
+    echo "✓ patched ~/.vimrc (syntax → silent! syntax)"
+  else
+    echo "⚠ could not patch ~/.vimrc automatically"
+  fi
+}
+
 install_chezmoi
-install_zi
+# Bare/low-power sources zsh-autosuggestions + zsh-syntax-highlighting directly
+# (see dot_zshrc.zi.zsh.tmpl) — the zi manager is skipped to save space.
+if [[ $LOWPOWER -eq 1 ]]; then
+  echo "✓ skipping zi manager (low-power — plugins sourced directly)"
+else
+  install_zi
+fi
 install_vim_plug
 install_packages
 install_nerd_font
@@ -509,15 +656,15 @@ echo
 
 # Single-select: tiny / lite / full
 select_profile() {
-  local options=("tiny" "lite" "full")
+  local options=("bare" "lite" "full")
   local descriptions=("Embedded — core plugins, no tmux, no extras" "Lightweight — core plugins, fzf, no tmux" "Everything — CoC, fnm, pyenv, tmux, the works")
-  local selected=0
+  local selected=2  # default: full (lowpower systems never reach here)
 
-  # Pre-select based on detected environment
-  if [[ $IS_TINY -eq 1 ]]; then
-    selected=0
-  else
-    selected=2
+  # No terminal → can't prompt; take the default silently.
+  if ! _have_tty; then
+    PROFILE="${options[$selected]}"
+    echo "${DIM}(no tty — profile defaulting to ${PROFILE})${RESET}"
+    return
   fi
 
   echo "${BOLD}Select profile:${RESET}"
@@ -537,8 +684,8 @@ select_profile() {
       fi
     done
 
-    # read single keypress
-    IFS= read -rsn1 key
+    # read single keypress (from the terminal, NOT the curl pipe on stdin)
+    IFS= read -rsn1 key </dev/tty
     case "$key" in
       A|k) ((selected > 0)) && ((selected--)) ;;  # up
       B|j) ((selected < ${#options[@]} - 1)) && ((selected++)) ;;  # down
@@ -564,10 +711,18 @@ select_modules() {
   case "$PROFILE" in
     full) checked=(1 1 1 1 1 1 1 1) ;;          # everything
     lite) checked=(1 0 0 0 0 0 1 1) ;;          # nvm + fzf + vscode
-    tiny) checked=(0 0 0 0 0 0 0 0) ;;          # nothing
+    bare) checked=(0 0 0 0 0 0 0 0) ;;          # nothing
   esac
 
   local cursor=0
+
+  # No terminal, or bare profile (no modules apply) → take defaults silently.
+  if ! _have_tty || [[ "$PROFILE" == "bare" ]]; then
+    for ((i = 0; i < ${#names[@]}; i++)); do
+      eval "MODULE_${names[$i]}=${checked[$i]}"
+    done
+    return
+  fi
 
   echo "${BOLD}Select modules:${RESET}"
   echo "${DIM}(↑/↓ move, Space toggle, Enter confirm)${RESET}"
@@ -587,7 +742,7 @@ select_modules() {
       fi
     done
 
-    IFS= read -rsn1 key
+    IFS= read -rsn1 key </dev/tty
     case "$key" in
       A|k) ((cursor > 0)) && ((cursor--)) ;;
       B|j) ((cursor < ${#names[@]} - 1)) && ((cursor++)) ;;
@@ -613,8 +768,15 @@ select_modules() {
   done
 }
 
-select_profile
-select_modules
+if [[ $LOWPOWER -eq 1 ]]; then
+  # Low-power hard-override: no menu — bare, all modules off.
+  PROFILE="bare"
+  echo "${BOLD}Profile:${RESET} bare ${DIM}(forced — low-power: $LOWPOWER_WHY)${RESET}"
+  for mod in nvm pyenv bun php copilot tmux fzf vscode; do eval "MODULE_${mod}=0"; done
+else
+  select_profile
+  select_modules
+fi
 
 echo
 echo "${BOLD}Profile:${RESET} $PROFILE"
@@ -658,6 +820,21 @@ bool() { [[ $1 -eq 1 ]] && echo "true" || echo "false"; }
 # ──────────────────────────────────────────────
 write_chezmoidata
 
+# chezmoi init clones the repo via git. On fresh Alpine (apk) git isn't installed
+# until `chezmoi apply` runs the linux-packages script — too late for init. Make
+# sure git exists first. (opkg already installs git in install_packages_opkg.)
+_ensure_git() {
+  command -v git &>/dev/null && return 0
+  echo "git missing — installing before chezmoi init..."
+  case "$PKG_MGR" in
+    apk)  $SUDO apk add --no-cache git 2>/dev/null || true ;;
+    apt)  $SUDO apt-get update -qq 2>/dev/null || true; $SUDO apt-get install -y -qq --no-install-recommends git 2>/dev/null || true ;;
+    opkg) opkg update 2>/dev/null || true; opkg install git-http 2>/dev/null || opkg install git 2>/dev/null || true ;;
+  esac
+  command -v git &>/dev/null && echo "✓ git installed" || echo "⚠ git still missing — chezmoi init may fail"
+}
+_ensure_git
+
 echo
 echo "Initializing chezmoi..."
 if [[ -d "$(chezmoi source-path 2>/dev/null)/.git" ]]; then
@@ -679,6 +856,17 @@ if command -v vim &>/dev/null && [[ $IS_TINY -eq 0 ]]; then
   echo "Installing vim plugins..."
   vim +PlugInstall +qall
   echo "✓ Vim plugins installed"
+fi
+
+# ──────────────────────────────────────────────
+# 7. Low-power finalize — bash→zsh shim + reclaim space
+# ──────────────────────────────────────────────
+# Runs AFTER apply so zsh (installed by the chezmoi run_once linux-packages
+# script) is present for the shim.
+if [[ $LOWPOWER -eq 1 ]]; then
+  harden_vimrc
+  install_bash_shim
+  cleanup_lowpower
 fi
 
 echo

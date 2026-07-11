@@ -18,13 +18,22 @@ README.md
 .vim/coc-settings.json
 {{ end }}
 
-# tmux only on full profile
-{{ if ne .profile "full" }}
+# tmux only on full profile AND only on a physical machine (never over SSH).
+# .tmux.* is for the box you sit at; installing it into an SSH'd-in embedded
+# host is pointless (and wastes space). SSH_CONNECTION/SSH_TTY/SSH_CLIENT all
+# empty => physical console.
+{{ if or (ne .profile "full") (ne (env "SSH_CONNECTION") "") (ne (env "SSH_TTY") "") (ne (env "SSH_CLIENT") "") }}
 .tmux.conf
 .tmux/**
 {{ end }}
 
-{{ if eq .chezmoi.os "darwin" }}
+# dysk: full profile ONLY. On full, keep just the arch-appropriate binary.
+{{ if ne .profile "full" }}
+.local/bin/dysk
+.local/bin/dysk-darwin
+.local/bin/dysk-linux
+.local/bin/dysk-linux.aarch64
+{{ else if eq .chezmoi.os "darwin" }}
 .local/bin/dysk-linux
 .local/bin/dysk-linux.aarch64
 {{ else if eq .chezmoi.arch "arm64" }}
@@ -35,10 +44,25 @@ README.md
 .local/bin/dysk-linux.aarch64
 {{ end }}
 
-# Tiny embedded (armv6/armv7) — strip eyecandy/node files
-# NOTE: .zshrc.zi.zsh is NOT stripped here — the tiny profile already
-# reduces it to a direct zsh-autosuggestions source (no zi manager).
-{{ if eq .chezmoi.arch "arm" }}
+# bare: drop dev/eyecandy helper scripts entirely
+{{ if eq .profile "bare" }}
+.local/bin/delint
+.local/bin/claude-tail
+.local/bin/diff-so-fancy
+{{ end }}
+
+# lsusb wrapper on bare Linux: keep ONLY if the usbutils lsusb binary AND perl
+# are both present (per requirement). macOS always keeps it (system_profiler path).
+{{ if and (eq .profile "bare") (eq .chezmoi.os "linux") (not (and (lookPath "lsusb") (lookPath "perl"))) }}
+.local/bin/lsusb
+{{ end }}
+
+# bare — strip eyecandy/node files. Effective profile is forced to "bare" by
+# install.sh whenever lowpower is detected (armv6/7, opkg/apk, or <128MB free),
+# so this covers all low-power SoCs regardless of the picked tier.
+# NOTE: .zshrc.zi.zsh is NOT stripped — the bare profile already reduces it to a
+# direct zsh-autosuggestions + zsh-syntax-highlighting source (no zi manager).
+{{ if eq .profile "bare" }}
 .zshrc.nvm.zsh
 .neofetch
 .vim/coc-settings.json
