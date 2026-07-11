@@ -49,17 +49,18 @@ fi
 [[ -f "$HOME/.zi/bin/zi.zsh" ]] || return 0 2>/dev/null || exit 0
 source "$HOME/.zi/bin/zi.zsh"
 
-# Core plugins (all profiles)
-zi light zsh-users/zsh-autosuggestions
-zi light zsh-users/zsh-syntax-highlighting
-zi light agkozak/zsh-z
+# Core plugins (all profiles). `zi ice depth=1` = shallow clone (saves space +
+# time); the ice modifier applies to the next zi command only.
+zi ice depth=1; zi light zsh-users/zsh-autosuggestions
+zi ice depth=1; zi light zsh-users/zsh-syntax-highlighting
+zi ice depth=1; zi light agkozak/zsh-z
 command -v sudo &>/dev/null && zi snippet OMZP::sudo
 
 {{ if eq .profile "full" -}}
 # Extra plugins (full profile)
-zi light alexrochas/zsh-extract
-zi light alexrochas/zsh-vim-crtl-z
-zi light alexrochas/zsh-git-semantic-commits
-zi light alexrochas/zsh-path-environment-explorer
+zi ice depth=1; zi light alexrochas/zsh-extract
+zi ice depth=1; zi light alexrochas/zsh-vim-crtl-z
+zi ice depth=1; zi light alexrochas/zsh-git-semantic-commits
+zi ice depth=1; zi light alexrochas/zsh-path-environment-explorer
 {{ end -}}
 {{ end -}}
