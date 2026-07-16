@@ -36,13 +36,6 @@ is_macos() { [[ "$DOTFILES_OS" == "darwin" ]]; }
 is_linux() { [[ "$DOTFILES_OS" == "linux" ]]; }
 is_wsl()   { [[ "$(uname -r)" == *microsoft* ]]; }
 
-if [[ "$GOOGLE_CLOUD_SHELL" == "true" && "$(hostname)" != "cloud-shell" ]]; then
-  echo " " | sudo tee -a /etc/hosts
-  echo "127.0.0.1 cloud-shell" | sudo tee -a /etc/hosts
-
-  sudo hostname cloud-shell 2>/dev/null
-fi
-
 # ──────────────────────────────────────────────
 # 4. Core Settings
 # ──────────────────────────────────────────────

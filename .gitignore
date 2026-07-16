@@ -6,3 +6,4 @@
 .netrwhist
 dotfiles-backup-*
 dot_tmux/plugins/*/dot_git/
+cloudshell.sh

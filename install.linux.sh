@@ -21,7 +21,6 @@ _log "USER=$(whoami) UID=$(id -u)"
 _log "SHELL=$SHELL"
 _log "PATH=$PATH"
 _log "uname: $(uname -a)"
-_log "GOOGLE_CLOUD_SHELL=${GOOGLE_CLOUD_SHELL:-unset}"
 _log "RUNPOD_PUBLIC_IP=${RUNPOD_PUBLIC_IP:-unset}"
 
 # ──────────────────────────────────────────────

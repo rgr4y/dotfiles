@@ -9,6 +9,7 @@
 .bash_history
 install.sh
 install.linux.sh
+cloudshell.sh
 docs/**
 README.md
 .gitignore
