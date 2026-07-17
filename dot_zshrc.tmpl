@@ -13,8 +13,19 @@ export PATH="$HOME/bin:$HOME/.local/bin:/usr/local/bin:/usr/local/sbin:$PATH"
 HISTFILE="$HOME/.zsh_history"
 HISTSIZE=1000000000
 SAVEHIST=1000000000
+{{- if eq .profile "bare" }}
+# bare/embedded: batch history writes to cut SD-card wear. Buffer in memory,
+# flush new events to disk at most once per $PERIOD sec via the periodic hook
+# (fires at prompt after commands). Hard-poweroff loses ≤ PERIOD sec of history.
+setopt HIST_FCNTL_LOCK          # safe locking for incremental append
+autoload -Uz add-zsh-hook
+_flush_history() { fc -AI }     # append only events new since last flush
+add-zsh-hook periodic _flush_history
+PERIOD=60
+{{- else }}
 setopt INC_APPEND_HISTORY
 setopt SHARE_HISTORY
+{{- end }}
 setopt HIST_IGNORE_DUPS
 setopt HIST_IGNORE_SPACE
 setopt HIST_FIND_NO_DUPS
