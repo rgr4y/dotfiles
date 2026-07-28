@@ -196,13 +196,13 @@ _apt_update_network() {
   $SUDO apt-get update -qq
   _log "apt-get update exit code: $?"
   local list_count
-  list_count=$(find "$lists_dir" -maxdepth 1 -type f | wc -l)
-  if [[ "$list_count" -gt 0 ]]; then
-    mkdir -p "$CACHE_DIR"
-    $SUDO tar czf "$LISTS_CACHE" -C "$lists_dir" . 2>/dev/null && \
-      _log "apt lists cached ($(du -h "$LISTS_CACHE" | cut -f1))"
-    $SUDO chown "$(id -u):$(id -g)" "$LISTS_CACHE" 2>/dev/null || true
-  fi
+  #list_count=$(find "$lists_dir" -maxdepth 1 -type f | wc -l)
+  #if [[ "$list_count" -gt 0 ]]; then
+  #  mkdir -p "$CACHE_DIR"
+  #  $SUDO tar czf "$LISTS_CACHE" -C "$lists_dir" . 2>/dev/null && \
+  #    _log "apt lists cached ($(du -h "$LISTS_CACHE" | cut -f1))"
+  #  $SUDO chown "$(id -u):$(id -g)" "$LISTS_CACHE" 2>/dev/null || true
+  #fi
 }
 
 # ──────────────────────────────────────────────
@@ -231,17 +231,17 @@ if ! command -v zsh &>/dev/null; then
     $INSTALL zsh
     _log "zsh install exit code: $?"
     # Save zsh binary cache
-    if command -v zsh &>/dev/null && [[ "$PM" == "apt" ]]; then
-      mkdir -p "$CACHE_DIR"
-      _log "Saving zsh binary cache..."
-      $SUDO tar czf "$ZSH_CACHE" \
-        /usr/bin/zsh \
-        /usr/bin/zsh5 \
-        /usr/lib/x86_64-linux-gnu/zsh 2>/dev/null && {
-        $SUDO chown "$(id -u):$(id -g)" "$ZSH_CACHE" 2>/dev/null || true
-        _log "zsh cache saved ($(du -h "$ZSH_CACHE" | cut -f1))"
-      }
-    fi
+    #if command -v zsh &>/dev/null && [[ "$PM" == "apt" ]]; then
+    #  mkdir -p "$CACHE_DIR"
+    #  _log "Saving zsh binary cache..."
+    #  $SUDO tar czf "$ZSH_CACHE" \
+    #    /usr/bin/zsh \
+    #    /usr/bin/zsh5 \
+    #    /usr/lib/x86_64-linux-gnu/zsh 2>/dev/null && {
+    #    $SUDO chown "$(id -u):$(id -g)" "$ZSH_CACHE" 2>/dev/null || true
+    #    _log "zsh cache saved ($(du -h "$ZSH_CACHE" | cut -f1))"
+    #  }
+    #fi
     echo "✓ zsh installed"
   fi
   _log "zsh now at: $(command -v zsh 2>/dev/null || echo NOT_FOUND)"
@@ -264,7 +264,7 @@ BASE_PKGS=(
 # Full packages (only with "full" profile)
 # ──────────────────────────────────────────────
 FULL_PKGS=(
-  iftop iotop btop tree screen tmux rsync rclone
+  iftop iotop btop tree screen rsync rclone
   dialog util-linux dnsutils
   iputils-ping iproute2 net-tools pigz nmap less
   jq m4 iperf3 gh
@@ -376,18 +376,18 @@ else
   done
 
   # Cache debs for next boot
-  if [[ "$PM" == "apt" ]]; then
-    apt_deb_count="$(ls /var/cache/apt/archives/*.deb 2>/dev/null | wc -l)"
-    _log "Caching debs from /var/cache/apt/archives..."
-    _log "Deb count: $apt_deb_count"
-    if [[ "$apt_deb_count" -gt 0 ]]; then
-      mkdir -p "$CACHE_DIR"
-      tar czf "$DEB_CACHE" -C /var/cache/apt/archives $(ls /var/cache/apt/archives/*.deb | xargs -n1 basename) 2>/dev/null && \
-        echo "✓ Deb cache saved to $DEB_CACHE ($(du -h "$DEB_CACHE" | cut -f1))"
-    else
-      _log "No debs in apt cache, skipping cache save"
-    fi
-  fi
+  #if [[ "$PM" == "apt" ]]; then
+  #  apt_deb_count="$(ls /var/cache/apt/archives/*.deb 2>/dev/null | wc -l)"
+  #  _log "Caching debs from /var/cache/apt/archives..."
+  #  _log "Deb count: $apt_deb_count"
+  #  if [[ "$apt_deb_count" -gt 0 ]]; then
+  #    mkdir -p "$CACHE_DIR"
+  #    tar czf "$DEB_CACHE" -C /var/cache/apt/archives $(ls /var/cache/apt/archives/*.deb | xargs -n1 basename) 2>/dev/null && \
+  #      echo "✓ Deb cache saved to $DEB_CACHE ($(du -h "$DEB_CACHE" | cut -f1))"
+  #  else
+  #    _log "No debs in apt cache, skipping cache save"
+  #  fi
+  #fi
 
   echo "✓ Linux packages installed"
 fi
@@ -426,18 +426,18 @@ for b in "${CACHE_BINS[@]}"; do
 done
 
 if [[ -f "$BIN_CACHE" ]] && ! _bins_all_present; then
-  _log "BIN_CACHE size: $(du -h "$BIN_CACHE" 2>/dev/null | cut -f1)"
-  echo "Restoring binaries from cache..."
-  tar xzf "$BIN_CACHE" -C / 2>/dev/null
-  _log "tar exit code: $?"
-  for b in "${CACHE_BINS[@]}"; do
-    _log "  After restore: $b exists=$(test -x "$b" && echo yes || echo no)"
-  done
-  echo "✓ Binaries restored from cache"
+  #_log "BIN_CACHE size: $(du -h "$BIN_CACHE" 2>/dev/null | cut -f1)"
+  #echo "Restoring binaries from cache..."
+  #tar xzf "$BIN_CACHE" -C / 2>/dev/null
+  #_log "tar exit code: $?"
+  #for b in "${CACHE_BINS[@]}"; do
+  #  _log "  After restore: $b exists=$(test -x "$b" && echo yes || echo no)"
+  #done
+  #echo "✓ Binaries restored from cache"
 elif [[ -f "$BIN_CACHE" ]]; then
-  _log "All binaries present, skipping cache restore"
+  #_log "All binaries present, skipping cache restore"
 else
-  _log "No bin cache found, will download individually"
+  #_log "No bin cache found, will download individually"
 fi
 
 # ──────────────────────────────────────────────
@@ -485,4 +485,4 @@ fi
 # ──────────────────────────────────────────────
 # Save binary cache if we downloaded anything new
 # ──────────────────────────────────────────────
-_save_bin_cache
+#_save_bin_cache

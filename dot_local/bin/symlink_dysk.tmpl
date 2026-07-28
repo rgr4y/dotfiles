@@ -1,7 +1,0 @@
-{{ if eq .chezmoi.os "darwin" -}}
-{{ .chezmoi.homeDir }}/.local/bin/dysk-darwin
-{{- else if eq .chezmoi.arch "arm64" -}}
-{{ .chezmoi.homeDir }}/.local/bin/dysk-linux.aarch64
-{{- else -}}
-{{ .chezmoi.homeDir }}/.local/bin/dysk-linux
-{{- end }}

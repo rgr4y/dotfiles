@@ -26,6 +26,7 @@ README.md
 {{ if or (ne .profile "full") (ne (env "SSH_CONNECTION") "") (ne (env "SSH_TTY") "") (ne (env "SSH_CLIENT") "") }}
 .tmux.conf
 .tmux/**
+.tmux.sh
 {{ end }}
 
 # dysk: full profile ONLY. On full, keep just the arch-appropriate binary.

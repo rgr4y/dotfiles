@@ -1,0 +1,241 @@
+#!/bin/sh
+# nicebench - portable one-command CPU/crypto benchmark for cross-device compare.
+# POSIX sh, busybox-safe. Runs on OpenWRT routers, Pi, VPS, rooted DVRs, macOS.
+#
+#   install:  cp nicebench ~/bin/nicebench && chmod +x ~/bin/nicebench
+#   run:      nicebench
+#
+# Trio (all try in order):
+#   1. openssl speed   - crypto MB/s (AES + SHA256). Near-universal, no install.
+#   2. sysbench cpu    - integer events/sec.  Installed if pkg mgr + privilege.
+#   3. 7-zip benchmark - compression MIPS.     Installed if pkg mgr + privilege.
+#
+# Real userland (apt/apk/opkg) + root/sudo -> installs missing tools.
+# Otherwise runs whatever is present, openssl-first.
+#
+# Results append to $BENCH_LOG (default ~/.bench_results.csv). Set BENCH_LOG= off.
+#
+# CROSS-DEVICE RULE: only compare same metric + same tool build.
+#   - openssl AES/SHA reflect BUILD too (LibreSSL/no-accel vs OpenSSL/HW-accel
+#     swing 20x on the SAME chip). Use for "this box as-is" throughput.
+#   - 7-zip MIPS + sysbench ev/s = raw integer core. Most build-stable. Trust these.
+
+BENCH_LOG="${BENCH_LOG:-$HOME/.bench_results.csv}"
+SUMMARY="$(mktemp 2>/dev/null || echo /tmp/nicebench.$$)"
+trap 'rm -f "$SUMMARY"' EXIT INT TERM
+
+# ---- colors (only when stdout is a tty and NO_COLOR unset) -----------------
+if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
+  e() { printf '\033[%sm' "$1"; }
+  RST=$(e 0); BOLD=$(e 1); DIM=$(e 2)
+  RED=$(e 31); GRN=$(e 32); YEL=$(e 33); BLU=$(e 34); MAG=$(e 35); CYN=$(e 36)
+else
+  RST=; BOLD=; DIM=; RED=; GRN=; YEL=; BLU=; MAG=; CYN=
+fi
+
+# ---- helpers ---------------------------------------------------------------
+have() { command -v "$1" >/dev/null 2>&1; }
+line() { printf '%b%s%b\n' "$DIM" "----------------------------------------------------------" "$RST"; }
+
+cpu_count() {
+  if have nproc; then nproc
+  elif [ -r /proc/cpuinfo ]; then grep -c '^processor' /proc/cpuinfo
+  elif have sysctl; then sysctl -n hw.ncpu 2>/dev/null || echo 1
+  else echo 1; fi
+}
+cpu_mhz() {
+  if [ -r /sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq ]; then
+    awk '{printf "%d", $1/1000}' /sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq
+  elif [ -r /proc/cpuinfo ] && grep -qi 'MHz' /proc/cpuinfo; then
+    awk -F: '/MHz/{printf "%d",$2; exit}' /proc/cpuinfo
+  else printf '?'; fi
+}
+cpu_model() {
+  [ -r /proc/cpuinfo ] && awk -F: '/model name|Hardware|Processor|cpu model/{gsub(/^ +/,"",$2);print $2;exit}' /proc/cpuinfo && return
+  have sysctl && sysctl -n machdep.cpu.brand_string 2>/dev/null
+}
+# arch of a binary (catches x86 bottle running under Rosetta on arm mac)
+bin_arch() { have file && file -b "$1" 2>/dev/null | grep -oE 'x86_64|arm64|aarch64' | head -1; }
+
+# ---- package manager -------------------------------------------------------
+PKG=""
+if   have apt-get; then PKG=apt
+elif have apk;     then PKG=apk
+elif have opkg;    then PKG=opkg
+elif have brew;    then PKG=brew
+fi
+SUDO=""; [ "$(id -u)" -ne 0 ] && have sudo && SUDO=sudo
+# brew needs no root (and must never run under sudo); others need root or sudo.
+can_install() {
+  [ -n "$PKG" ] || return 1
+  [ "$PKG" = brew ] && return 0
+  [ "$(id -u)" -eq 0 ] || [ -n "$SUDO" ]
+}
+
+APT_DONE=""; OPKG_DONE=""
+install_one() { # $1 = one candidate package name, via detected PKG
+  case $PKG in
+    apt) [ -z "$APT_DONE" ] && { $SUDO apt-get update -qq >/dev/null 2>&1; APT_DONE=1; }
+         $SUDO apt-get install -y -qq "$1" >/dev/null 2>&1 ;;
+    apk) $SUDO apk add "$1" >/dev/null 2>&1 ;;          # OpenWrt 25 + Alpine (no --no-cache: apk-tools v3)
+    opkg) [ -z "$OPKG_DONE" ] && { $SUDO opkg update >/dev/null 2>&1; OPKG_DONE=1; }
+          $SUDO opkg install "$1" >/dev/null 2>&1 ;;
+    brew) brew install "$1" >/dev/null 2>&1 ;;          # never sudo brew
+  esac
+}
+# ensure <bin> <apt-cands> <apk-cands> <opkg-cands> <brew-cands>
+# each *-cands is a SPACE-SEP candidate list; tried in order, first to yield the
+# binary wins. apk covers BOTH OpenWrt (openssl-util) and Alpine (openssl) names.
+ensure() {
+  bin=$1; apt=$2; apk=$3; opk=$4; brw=$5
+  have "$bin" && return 0
+  can_install || { printf '   %b(no %s, no pkg mgr/privilege - skip)%b\n' "$DIM" "$bin" "$RST"; return 1; }
+  case $PKG in apt) cands=$apt ;; apk) cands=$apk ;; opkg) cands=$opk ;; brew) cands=$brw ;; *) cands='' ;; esac
+  for p in $cands; do
+    printf '   %binstalling %s (%s %s)...%b\n' "$DIM" "$bin" "$PKG" "$p" "$RST"
+    install_one "$p"
+    have "$bin" && return 0
+  done
+  have "$bin"
+}
+
+csv() { [ -n "$BENCH_LOG" ] && printf '%s,%s,%s,%s,%s,%s,%s,%s\n' \
+        "$EPOCH" "$HOST" "$ARCH" "$CORES" "$MHZ" "$1" "$2" "$3" >>"$BENCH_LOG"; }
+sum() { printf '%s|%s|%s\n' "$1" "$2" "$3" >>"$SUMMARY"; }
+record() { printf '   %b=>%b %s: %b%s %s%b\n' "$CYN" "$RST" "$2" "$BOLD$GRN" "$3" "$4" "$RST"; csv "$1" "$2" "$3"; sum "$1" "$2" "$3 $4"; }
+
+# ---- system info -----------------------------------------------------------
+HOST="$(hostname 2>/dev/null || uname -n)"
+ARCH="$(uname -m)"
+CORES="$(cpu_count)"
+MHZ="$(cpu_mhz)"
+MODEL="$(cpu_model)"
+EPOCH="$(date +%s 2>/dev/null || echo 0)"
+
+if [ -n "$BENCH_LOG" ] && [ ! -f "$BENCH_LOG" ]; then
+  printf 'epoch,host,arch,cores,mhz,bench,metric,value\n' >"$BENCH_LOG"
+fi
+
+line
+printf '%bnicebench%b  host=%b%s%b  arch=%s  cores=%s  mhz=%s\n' \
+  "$BOLD$CYN" "$RST" "$BOLD" "$HOST" "$RST" "$ARCH" "$CORES" "$MHZ"
+[ -n "$MODEL" ] && printf 'cpu: %b%s%b\n' "$MAG" "$MODEL" "$RST"
+printf 'pkg mgr: %s   install: %s\n' "${PKG:-none}" "$(can_install && printf '%byes%b' "$GRN" "$RST" || printf '%bno%b' "$YEL" "$RST")"
+# Rosetta guard: translated shell makes every number x86-emulated (bogus)
+if [ "$(sysctl -n sysctl.proc_translated 2>/dev/null)" = "1" ]; then
+  printf '%b*** WARNING: running under ROSETTA - all numbers are x86-emulated, NOT native ***%b\n' "$BOLD$RED" "$RST"
+fi
+line
+
+# pick best openssl: real OpenSSL beats LibreSSL (LibreSSL has no HW-accel path,
+# skews AES ~20x on the same chip). Scans PATH + common brew locations.
+pick_openssl() {
+  fallback=""
+  for c in \
+    "$(command -v openssl 2>/dev/null)" \
+    /opt/homebrew/bin/openssl \
+    /opt/homebrew/opt/openssl*/bin/openssl \
+    /usr/local/opt/openssl*/bin/openssl \
+    /usr/local/bin/openssl \
+    /usr/bin/openssl; do
+    [ -n "$c" ] && [ -x "$c" ] || continue
+    case "$("$c" version 2>/dev/null)" in
+      OpenSSL*) printf '%s\n' "$c"; return 0 ;;   # real OpenSSL wins now
+    esac
+    [ -z "$fallback" ] && fallback="$c"           # remember first (LibreSSL) fallback
+  done
+  [ -n "$fallback" ] && { printf '%s\n' "$fallback"; return 0; }
+  return 1
+}
+
+# ---- 1. openssl (-> 2 numbers: AES / SHA256) -------------------------------
+printf '\n%b[1/4] openssl speed%b  %b(crypto MB/s = 16384B block / 1000)%b\n' "$BOLD$BLU" "$RST" "$DIM" "$RST"
+ensure openssl "openssl" "openssl-util openssl" "openssl-util openssl" "openssl" >/dev/null 2>&1 || true
+OSSL="$(pick_openssl)"
+if [ -n "$OSSL" ]; then
+  OSSLVER="$("$OSSL" version 2>/dev/null | awk '{print $1, $2}')"
+  oa="$(bin_arch "$OSSL")"
+  printf '   %busing: %s (%s%s)%b\n' "$DIM" "$OSSL" "$OSSLVER" "${oa:+, $oa}" "$RST"
+  case "$ARCH/$oa" in arm64/x86_64) printf '   %bWARNING: x86 openssl on arm64 - emulated, AES crippled%b\n' "$BOLD$RED" "$RST" ;; esac
+  case "$OSSLVER" in LibreSSL*) printf '   WARNING: LibreSSL - AES number unreliable, install brew openssl\n' ;; esac
+  aes=""; sha=""
+  for algo in aes-256-cbc sha256; do
+    val="$("$OSSL" speed -elapsed -evp "$algo" -seconds 1 2>/dev/null \
+           | grep -iE "^$algo|^${algo%%-*}" \
+           | awk '{v=$NF; gsub(/k/,"",v); print v}' | tail -1)"
+    if [ -n "$val" ]; then
+      mbs="$(awk -v v="$val" 'BEGIN{printf "%.0f", v/1000}')"
+      printf '   %b=>%b %s: %b%s MB/s%b\n' "$CYN" "$RST" "$algo" "$BOLD$GRN" "$mbs" "$RST"
+      csv openssl "$algo" "$mbs"
+      case $algo in aes-256-cbc) aes=$mbs ;; sha256) sha=$mbs ;; esac
+    else
+      printf '   %b(no parseable line for %s)%b\n' "$YEL" "$algo" "$RST"
+    fi
+  done
+  sum openssl "AES/SHA256" "${aes:-?} / ${sha:-?} MB/s (${OSSLVER})"
+else
+  printf '   openssl unavailable - skipped\n'
+fi
+
+# ---- 2. sysbench -----------------------------------------------------------
+printf '\n%b[2/4] sysbench cpu%b  %b(events/sec, all cores)%b\n' "$BOLD$BLU" "$RST" "$DIM" "$RST"
+if ensure sysbench "sysbench" "sysbench" "" "sysbench"; then
+  out="$(sysbench cpu --cpu-max-prime=20000 --threads="$CORES" --time=5 run 2>/dev/null)"
+  eps="$(printf '%s\n' "$out" | awk -F: '/events per second/{gsub(/ /,"",$2);print $2;exit}')"
+  if [ -z "$eps" ]; then
+    out="$(sysbench --test=cpu --cpu-max-prime=20000 --num-threads="$CORES" run 2>/dev/null)"
+    tot="$(printf '%s\n' "$out" | awk -F: '/total number of events/{gsub(/ /,"",$2);print $2;exit}')"
+    tim="$(printf '%s\n' "$out" | awk -F: '/total time/{gsub(/[ s]/,"",$2);print $2;exit}')"
+    [ -n "$tot" ] && [ -n "$tim" ] && eps="$(awk -v e="$tot" -v t="$tim" 'BEGIN{printf "%.1f", e/t}')"
+  fi
+  if [ -n "$eps" ]; then record sysbench events_per_sec "$eps" "ev/s"
+  else printf '   %b(ran but output unparseable)%b\n' "$YEL" "$RST"; fi
+else
+  printf '   %bsysbench unavailable - skipped%b\n' "$DIM" "$RST"
+fi
+
+# ---- 3. sysbench memory (bandwidth) ----------------------------------------
+# block reused in a loop, so total-size does NOT allocate RAM - safe on low-mem
+# boxes. Streaming/ingest workloads live and die on this number, not on CPU.
+printf '\n%b[3/4] sysbench memory%b  %b(bandwidth MiB/s, all cores)%b\n' "$BOLD$BLU" "$RST" "$DIM" "$RST"
+if have sysbench; then
+  out="$(sysbench memory --memory-block-size=1M --memory-total-size=16G --threads="$CORES" run 2>/dev/null)"
+  bw="$(printf '%s\n' "$out" | awk -F'[()]' '/MiB\/sec/{split($2,a," ");print a[1];exit}')"
+  if [ -n "$bw" ]; then record membw bandwidth "$bw" "MiB/s"
+  else printf '   %b(ran but output unparseable)%b\n' "$YEL" "$RST"; fi
+else
+  printf '   %bsysbench unavailable - skipped%b\n' "$DIM" "$RST"
+fi
+
+# ---- 4. 7-zip --------------------------------------------------------------
+printf '\n%b[4/4] 7-zip benchmark%b  %b(compression MIPS)%b\n' "$BOLD$BLU" "$RST" "$DIM" "$RST"
+SEVENZ=""
+for b in 7zz 7z 7za 7zr; do have "$b" && { SEVENZ=$b; break; }; done
+if [ -z "$SEVENZ" ]; then
+  ensure 7zz "7zip p7zip-full" "7zip p7zip" "7zip p7zip" "sevenzip"
+  for b in 7zz 7z 7za 7zr; do have "$b" && { SEVENZ=$b; break; }; done
+fi
+if [ -n "$SEVENZ" ]; then
+  printf '   %busing: %s%b\n' "$DIM" "$SEVENZ" "$RST"
+  mips="$("$SEVENZ" b 2>/dev/null | awk '/^Tot:/{print $NF; exit}')"
+  if [ -n "$mips" ]; then record 7zip total_mips "$mips" "MIPS"
+  else printf '   %b(ran but no Tot: line parsed)%b\n' "$YEL" "$RST"; fi
+else
+  printf '   %b7-zip unavailable - skipped%b\n' "$DIM" "$RST"
+fi
+
+# ---- summary ---------------------------------------------------------------
+printf '\n'; line
+printf '%bSUMMARY%b  %b%s%b (%s, %s cores @ %s MHz)\n' \
+  "$BOLD$CYN" "$RST" "$BOLD" "$HOST" "$RST" "$ARCH" "$CORES" "$MHZ"
+line
+if [ -s "$SUMMARY" ]; then
+  awk -F'|' -v c="$CYN" -v g="$BOLD$GRN" -v r="$RST" \
+    '{printf "  %s%-9s%s %-14s %s%s%s\n", c,$1,r, $2, g,$3,r}' "$SUMMARY"
+else
+  printf '  %bnothing ran - no tool available/installable%b\n' "$YEL" "$RST"
+fi
+line
+printf '%btrust for cross-box CPU: 7zip MIPS, sysbench ev/s (build-stable)%b\n' "$DIM" "$RST"
+printf '%bopenssl = this box+build only (HW-accel/LibreSSL skews AES 20x)%b\n' "$DIM" "$RST"
+[ -n "$BENCH_LOG" ] && printf '%blog: %s%b\n' "$DIM" "$BENCH_LOG" "$RST"
