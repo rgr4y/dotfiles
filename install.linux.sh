@@ -265,7 +265,7 @@ BASE_PKGS=(
 # ──────────────────────────────────────────────
 FULL_PKGS=(
   iftop iotop btop tree screen rsync rclone
-  dialog util-linux dnsutils
+  dialog util-linux bind9-dnsutils
   iputils-ping iproute2 net-tools pigz nmap less
   jq m4 iperf3 gh
 )
@@ -433,10 +433,13 @@ if [[ -f "$BIN_CACHE" ]] && ! _bins_all_present; then
   #for b in "${CACHE_BINS[@]}"; do
   #  _log "  After restore: $b exists=$(test -x "$b" && echo yes || echo no)"
   #done
+  _log "HEH"
   #echo "✓ Binaries restored from cache"
 elif [[ -f "$BIN_CACHE" ]]; then
+  _log "HEH"
   #_log "All binaries present, skipping cache restore"
 else
+  _log "HEH"
   #_log "No bin cache found, will download individually"
 fi
 
