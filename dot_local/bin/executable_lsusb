@@ -17,7 +17,7 @@
 # - Cross-platform support (macOS and Linux)
 #
 # Usage: lsusb.sh [-A]
-#   -A: Show Apple Inc. devices (macOS) or Linux Foundation devices (Linux)
+#   -A: Un-dim Apple (macOS) / Linux Foundation (Linux) devices — shown greyed by default
 
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -36,15 +36,22 @@
 
 # Parse command line arguments
 SHOW_APPLE=false
+TREE_MODE=false
 while [[ $# -gt 0 ]]; do
     case $1 in
         -A)
             SHOW_APPLE=true
             shift
             ;;
+        -t|--tree)
+            TREE_MODE=true
+            shift
+            ;;
         *)
-            echo "Usage: $0 [-A]"
-            echo "  -A: Show Apple Inc. devices"
+            echo "Usage: $0 [-A] [-t]"
+            echo "  -A: Un-dim Apple/Linux Foundation devices (shown greyed by default)"
+            echo "  -t: Topology tree — host controllers -> hubs -> devices, with empty ports"
+            echo "      (Linux; friendly names via ~/.config/usb-labels, keyed by VID:PID or bus-port)"
             exit 1
             ;;
     esac
@@ -61,6 +68,99 @@ NC="\033[0m" # No Color
 
 # Detect operating system
 OS_TYPE=$(uname -s)
+
+# ---------------------------------------------------------------------------
+# Topology tree mode (-t). Linux only, built from sysfs (reliable parent/child
+# + maxchild for empty ports). Friendly labels from ~/.config/usb-labels:
+#   1a86:8091 = CH334F internal hub      # keyed by VID:PID
+#   3-2       = USB-C port               # keyed by sysfs bus-port path
+#   usb1      = xHCI (USB-C)             # keyed by root hub name
+# ---------------------------------------------------------------------------
+declare -A USB_LABELS
+load_usb_labels() {
+    local f="${USB_LABELS_FILE:-$HOME/.config/usb-labels}" line key val
+    [[ -r "$f" ]] || return
+    while IFS= read -r line; do
+        line="${line%%#*}"
+        [[ "$line" == *"="* ]] || continue
+        key="${line%%=*}"; val="${line#*=}"
+        key="${key#"${key%%[![:space:]]*}"}"; key="${key%"${key##*[![:space:]]}"}"
+        val="${val#"${val%%[![:space:]]*}"}"; val="${val%"${val##*[![:space:]]}"}"
+        [[ -n "$key" ]] && USB_LABELS["$key"]="$val"
+    done < "$f"
+}
+
+tree_speed() {  # sysfs speed number -> friendly
+    case "$1" in
+        1.5) echo "1.5M";; 12) echo "12M";; 480) echo "480M";;
+        5000) echo "5G";; 10000) echo "10G";; 20000) echo "20G";;
+        "") echo "";; *) echo "${1}M";;
+    esac
+}
+
+tree_dev_drivers() {  # sysfs device dir -> unique comma list of interface drivers
+    local d="$1" i drv out=""
+    for i in "$d"/*:*; do
+        [[ -e "$i/driver" ]] || continue
+        drv="$(basename "$(readlink -f "$i/driver")")"
+        [[ ",$out," == *",$drv,"* ]] || out="${out:+$out,}$drv"
+    done
+    echo "$out"
+}
+
+# recurse a hub: node_dir, base child portpath (e.g. "3-" or "3-1."), ascii prefix
+tree_walk() {
+    local node="$1" base="$2" pfx="$3"
+    local maxchild; maxchild="$(cat "$node/maxchild" 2>/dev/null || echo 0)"
+    [[ "$maxchild" =~ ^[0-9]+$ ]] || maxchild=0
+    (( maxchild == 0 )) && return
+    local port child cdir conn nextpfx
+    for (( port=1; port<=maxchild; port++ )); do
+        child="${base}${port}"
+        cdir="/sys/bus/usb/devices/${child}"
+        if (( port == maxchild )); then conn="└─"; nextpfx="${pfx}   "; else conn="├─"; nextpfx="${pfx}│  "; fi
+        if [[ -d "$cdir" ]]; then
+            local vid pid prod spd drv name lbl
+            vid="$(cat "$cdir/idVendor" 2>/dev/null)"
+            pid="$(cat "$cdir/idProduct" 2>/dev/null)"
+            prod="$(cat "$cdir/product" 2>/dev/null)"
+            spd="$(tree_speed "$(cat "$cdir/speed" 2>/dev/null)")"
+            drv="$(tree_dev_drivers "$cdir")"
+            name="${prod:-Unknown device}"
+            lbl="${USB_LABELS[$child]:-${USB_LABELS[$vid:$pid]:-$name}}"
+            printf "%b%s %s  %b%s:%s%b  %s  %b%s%b\n" \
+                "$pfx" "$conn" "$lbl" "$DIM" "$vid" "$pid" "$NC" "${drv:-–}" "$CYAN" "$spd" "$NC"
+            tree_walk "$cdir" "${child}." "$nextpfx"
+        else
+            lbl="${USB_LABELS[$child]:-}"
+            printf "%b%s %b%s(empty)%b\n" "$pfx" "$conn" "$DIM" "${lbl:+$lbl }" "$NC"
+        fi
+    done
+}
+
+print_usb_tree_linux() {
+    load_usb_labels
+    local root bus ctrl cdrv spd rootlbl
+    for root in $(ls -d /sys/bus/usb/devices/usb* 2>/dev/null | sort -V); do
+        bus="$(cat "$root/busnum" 2>/dev/null)"
+        ctrl="$(basename "$(readlink -f "$root/.." 2>/dev/null)")"
+        cdrv="$(basename "$(readlink -f "$root/../driver" 2>/dev/null)")"
+        spd="$(tree_speed "$(cat "$root/speed" 2>/dev/null)")"
+        rootlbl="${USB_LABELS[$(basename "$root")]:-$ctrl}"
+        printf "%b%s%b  Bus %03d  %s  %b%s%b\n" \
+            "$BLUE" "$rootlbl" "$NC" "$((10#$bus))" "$cdrv" "$CYAN" "$spd" "$NC"
+        tree_walk "$root" "${bus}-" ""
+    done
+}
+
+if [[ "$TREE_MODE" == true ]]; then
+    if [[ "$OS_TYPE" == "Linux" ]]; then
+        print_usb_tree_linux
+        exit 0
+    else
+        echo "Note: -t topology tree is Linux-only; macOS output already groups by controller." >&2
+    fi
+fi
 
 # Collect serial port → USB device mapping (macOS only)
 declare -A serial_port_map   # key: "vendorhex:producthex" → value: "/dev/cu.xxx"
@@ -114,7 +214,9 @@ fi
 get_speed_color() {
     local speed="$1"
     local speed_color="$NC"
-    if [[ "$speed" == *"10000"* || "$speed" == *"10 Gb"* || "$speed" == *"10Gbps"* ]]; then
+    if [[ "$speed" == *"20000"* || "$speed" == *"20 Gb"* || "$speed" == *"20Gbps"* ]]; then
+        speed_color="$GREEN"
+    elif [[ "$speed" == *"10000"* || "$speed" == *"10 Gb"* || "$speed" == *"10Gbps"* ]]; then
         speed_color="$GREEN"
     elif [[ "$speed" == *"5000"* || "$speed" == *"5 Gb"* || "$speed" == *"5Gbps"* ]]; then
         speed_color="$GREEN"
@@ -158,6 +260,7 @@ declare -a device_prod_ids
 declare -a device_vend_ids
 declare -a device_vend_names
 declare -a device_speeds
+declare -a device_dims
 device_count=0
 
 # First pass: collect all visible devices
@@ -170,14 +273,14 @@ speed=""
 
 collect_device() {
     if [[ -n "$current_device" && ( -n "$prod_id" || -n "$vend_id" || -n "$speed" ) ]]; then
-        # Skip Apple devices unless -A flag is set
-        if [[ "$vend_name" == "Apple Inc." || "$vend_name" == "Apple" ]]; then
-            if [[ "$SHOW_APPLE" == false ]]; then
-                return
-            fi
+        # Dim Apple devices unless -A (always shown, so empty output isn't mistaken for a failure)
+        local row_dim=""
+        if [[ "$vend_name" == "Apple Inc." || "$vend_name" == "Apple" ]] && [[ "$SHOW_APPLE" == false ]]; then
+            row_dim="$DIM"
         fi
-        
+
         # Store device info
+        device_dims[$device_count]="$row_dim"
         device_names[$device_count]="$current_device"
         device_indents[$device_count]="$current_indent"
         device_prod_ids[$device_count]="$prod_id"
@@ -249,9 +352,11 @@ for ((i=0; i<device_count; i++)); do
     vend_id="${device_vend_ids[$i]}"
     vend_name="${device_vend_names[$i]}"
     speed="${device_speeds[$i]}"
-    
-    # Color by speed
+    row_dim="${device_dims[$i]}"
+
+    # Color by speed (dim overrides when showing a hidden-class device greyed)
     speed_color=$(get_speed_color "$speed")
+    if [[ -n "$row_dim" ]]; then line_pre="$DIM"; speed_color="$DIM"; else line_pre=""; fi
 
     # Check for serial port mapping
     # Normalize IDs to lowercase for matching
@@ -301,7 +406,7 @@ for ((i=0; i<device_count; i++)); do
         serial_suffix=" ${CYAN}${serial_dev}${NC}"
     fi
 
-    printf "%s | %-10s | %-10s | %-15s | ${speed_color}%-15s${NC}%b\n" \
+    printf "${line_pre}%s | %-10s | %-10s | %-15s | ${speed_color}%-15s${NC}%b\n" \
         "$device_col" "$prod_id" "$vend_id" "$display_vend" "$speed" "$serial_suffix"
 done
 
@@ -315,7 +420,7 @@ else
     current_bus=""
     while IFS= read -r line; do
         # Root hub lines: /:  Bus 001.Port 001: Dev 001, Class=root_hub, Driver=xhci_hcd/6p, 480M
-        if [[ "$line" =~ ^/:.*Bus\ ([0-9]+).*Dev\ ([0-9]+).*,\ ([0-9]+\.?[0-9]*[MG])$ ]]; then
+        if [[ "$line" =~ ^/:.*Bus\ ([0-9]+).*Dev\ ([0-9]+).*,\ ([0-9]+\.?[0-9]*[MG])(/x[0-9]+)?$ ]]; then
             current_bus="${BASH_REMATCH[1]}"
             dev="${BASH_REMATCH[2]}"
             speed="${BASH_REMATCH[3]}"
@@ -324,7 +429,7 @@ else
             device_speeds["$bus_padded:$dev_padded"]="$speed"
             device_indent["$bus_padded:$dev_padded"]=0
         # Child device lines: |__ Port 005: Dev 002, If 0, Class=Hub, Driver=hub/4p, 480M
-        elif [[ "$line" =~ Dev\ ([0-9]+).*,\ ([0-9]+\.?[0-9]*[MG])$ && -n "$current_bus" ]]; then
+        elif [[ "$line" =~ Dev\ ([0-9]+).*,\ ([0-9]+\.?[0-9]*[MG])(/x[0-9]+)?$ && -n "$current_bus" ]]; then
             dev="${BASH_REMATCH[1]}"
             speed="${BASH_REMATCH[2]}"
             bus_padded=$(printf "%03d" "$((10#$current_bus))")
@@ -368,9 +473,10 @@ else
                 device_name="$full_name"
             fi
             
-            # Skip Linux Foundation devices unless -A flag is set
+            # Dim Linux Foundation devices unless -A (always shown, so empty output isn't mistaken for a failure)
+            row_dim=""
             if [[ "$vend_name" == *"Linux Foundation"* && "$SHOW_APPLE" == false ]]; then
-                continue
+                row_dim="$DIM"
             fi
             
             # Get speed from associative array
@@ -441,7 +547,8 @@ else
                 serial_suffix=" ${CYAN}${serial_dev}${NC}"
             fi
 
-            printf "%s | %-10s | %-10s | %-15s | ${speed_color}%-15s${NC}%b\n" \
+            if [[ -n "$row_dim" ]]; then line_pre="$DIM"; speed_color="$DIM"; else line_pre=""; fi
+            printf "${line_pre}%s | %-10s | %-10s | %-15s | ${speed_color}%-15s${NC}%b\n" \
                 "$device_col" "$prod_id" "$vend_id" "$display_vend" "$speed_display" "$serial_suffix"
         fi
     done < <(/usr/bin/lsusb 2>/dev/null)
