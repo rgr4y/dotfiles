@@ -162,7 +162,7 @@ if [ -n "$ZSH_VERSION" ]; then
   alias zr='source $HOME/.zshrc; echo "Sourced $HOME/.zshrc"'
 fi
 
+alias bigfiles='du -h -d 3 . 2>/dev/null | sort -rh | head -20'
+
 # ── The Classics ────────────────────────────
 alias goodshit='GOODSHIT="👌👀👌👀👌👀👌👀👌👀 good shit go౦ԁ sHit👌 thats ✔ some good👌👌shit right👌👌there👌👌👌 right✔there ✔✔if i do ƽaү so my self 💯 i say so 💯 thats what im talking about right there right there (chorus: ʳᶦᵍʰᵗ ᵗʰᵉʳᵉ) mMMMMᎷМ💯 👌👌 👌НO0ОଠOOOOOОଠଠOoooᵒᵒᵒᵒᵒᵒᵒᵒᵒ👌 👌👌 👌 💯 👌 👀 👀 👀 👌👌Good shit" && echo $GOODSHIT | pbcopy && echo $GOODSHIT'
-
-alias bigfiles='du -h -d 3 . | sort -rh | head -20'
