@@ -164,5 +164,43 @@ fi
 
 alias bigfiles='du -h -d 3 . 2>/dev/null | sort -rh | head -20'
 
+# Filtered `ip addr` — drop utun*/llw* noise, link-local, and IP-less/inactive ifaces.
+# Usage: ipa            (like `ip addr`, filtered)
+#        ipa show en0   (args pass through to real ip)
+#        ipa -A         (show all — bypass filter)
+ipa() {
+  if [[ "$1" == "-A" ]]; then shift; command ip addr "$@"; return; fi
+  local C=1; [[ -t 1 && -z "$NO_COLOR" ]] || C=0
+  command ip addr "$@" | awk -v C="$C" '
+    function col(s, c) { return C ? "\033[" c "m" s "\033[0m" : s }
+    function flush() { if (buf != "" && keep && has) print buf; buf=""; has=0; keep=1 }
+    /^[0-9]+: / {
+      flush()
+      name=$2; sub(/:$/,"",name)
+      keep=(name !~ /^(utun|llw|awdl|gif|stf|anpi)/)
+      cl=$0
+      sub("^([0-9]+): " name, "" $1 " " col(name, "1;36"), cl)   # iface name -> bold cyan
+      if      (cl ~ /status UP/)   sub(/status UP/,   "status " col("UP",   "1;32"), cl)
+      else if (cl ~ /status DOWN/) sub(/status DOWN/, "status " col("DOWN", "1;31"), cl)
+      buf=cl
+      next
+    }
+    {
+      cl=$0
+      if ($1=="inet") {
+        if ($2 !~ /^127\./) has=1                               # keep 169.254 autoIP (real link)
+        sub($2, col($2, ($2 ~ /^169\.254\./) ? "33" : "32"), cl) # autoIP yellow, routable green
+      } else if ($1=="inet6") {
+        if ($2 !~ /^(fe80|::1)/) has=1
+        sub($2, col($2, "35"), cl)                              # v6 addr -> magenta
+      } else if ($1=="link/ether") {
+        sub($2, col($2, "2;37"), cl)                            # MAC -> dim
+      }
+      buf = buf ORS cl
+    }
+    END { flush() }
+  '
+}
+
 # ── The Classics ────────────────────────────
 alias goodshit='GOODSHIT="👌👀👌👀👌👀👌👀👌👀 good shit go౦ԁ sHit👌 thats ✔ some good👌👌shit right👌👌there👌👌👌 right✔there ✔✔if i do ƽaү so my self 💯 i say so 💯 thats what im talking about right there right there (chorus: ʳᶦᵍʰᵗ ᵗʰᵉʳᵉ) mMMMMᎷМ💯 👌👌 👌НO0ОଠOOOOOОଠଠOoooᵒᵒᵒᵒᵒᵒᵒᵒᵒ👌 👌👌 👌 💯 👌 👀 👀 👀 👌👌Good shit" && echo $GOODSHIT | pbcopy && echo $GOODSHIT'
