@@ -1,8 +1,20 @@
+# ── zsh-autosuggestions perf tuning (MUST precede plugin load) ──
+# Rebind widgets once at first prompt, not every precmd (default = decent hit).
+ZSH_AUTOSUGGEST_MANUAL_REBIND=1
+# Skip fetch on long lines (pasted cmds, long pipelines).
+ZSH_AUTOSUGGEST_BUFFER_MAX_SIZE=20
+# Cheapest strategy; never add `completion` (spawns a pty per fetch).
+ZSH_AUTOSUGGEST_STRATEGY=(history)
+# NOTE: async auto-enables on zsh >=5.0.8 (plugin defines USE_ASYNC empty in
+# start.zsh; gate is ${+VAR} = "is defined", not value). Setting it here is a
+# no-op — plugin overwrites it. To FORCE async OFF (single-core), instead:
+#   unset ZSH_AUTOSUGGEST_USE_ASYNC   # AFTER `zi light zsh-autosuggestions`
+
 {{ if eq .profile "bare" -}}
 # Bare profile — NO zi manager (too heavy for embedded). Just clone the two
 # plugins we actually want directly with git and source their files by hand:
 #   zsh-autosuggestions      (history autocomplete)
-#   zsh-syntax-highlighting  (command coloring) — MUST be sourced last
+#   fast-syntax-highlighting (command coloring) — MUST be sourced last
 # A per-dir lock lets concurrent shells cooperate on first-run clone.
 _zp_clone_source() {
   # $1 = install dir, $2 = repo url, $3 = file to source once present
@@ -22,8 +34,8 @@ _zp_clone_source() {
 }
 _zp_clone_source "$HOME/.zsh/zsh-autosuggestions" \
   https://github.com/zsh-users/zsh-autosuggestions zsh-autosuggestions.zsh
-_zp_clone_source "$HOME/.zsh/zsh-syntax-highlighting" \
-  https://github.com/zsh-users/zsh-syntax-highlighting zsh-syntax-highlighting.zsh
+_zp_clone_source "$HOME/.zsh/fast-syntax-highlighting" \
+  https://github.com/z-shell/fast-syntax-highlighting F-Sy-H.plugin.zsh
 unset -f _zp_clone_source
 {{ else -}}
 # Zi plugin manager — auto-installs if git available
@@ -52,7 +64,6 @@ source "$HOME/.zi/bin/zi.zsh"
 # Core plugins (all profiles). `zi ice depth=1` = shallow clone (saves space +
 # time); the ice modifier applies to the next zi command only.
 zi ice depth=1; zi light zsh-users/zsh-autosuggestions
-zi ice depth=1; zi light zsh-users/zsh-syntax-highlighting
 zi ice depth=1; zi light agkozak/zsh-z
 command -v sudo &>/dev/null && zi snippet OMZP::sudo
 
@@ -63,4 +74,8 @@ zi ice depth=1; zi light alexrochas/zsh-vim-crtl-z
 zi ice depth=1; zi light alexrochas/zsh-git-semantic-commits
 zi ice depth=1; zi light alexrochas/zsh-path-environment-explorer
 {{ end -}}
+
+# fast-syntax-highlighting — faster per keystroke than zsh-syntax-highlighting.
+# MUST load last: it wraps every widget added by the plugins above.
+zi ice depth=1; zi light z-shell/fast-syntax-highlighting
 {{ end -}}
