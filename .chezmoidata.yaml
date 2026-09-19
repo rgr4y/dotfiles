@@ -1,5 +1,9 @@
 profile: lite
 lowpower: false
+# Hard gate for the CPU temperature prompt tag. install.sh overwrites this at
+# first pull via detect_vm(); false here is the safe default (tag shown if the
+# host has SoC thermal zones).
+is_vm: false
 modules:
   nvm: false
   pyenv: false

@@ -1,0 +1,10 @@
+# Files chezmoi should delete from the target on apply (templated).
+#
+# auto-sudo: remove the alias list and its loader from disk for hosts that can't
+# or needn't sudo — root (already privileged), Android (no sudo), and any host
+# without a sudo binary. .chezmoiignore stops them being re-created; this removes
+# copies left over from a previous apply.
+{{ if or (eq .chezmoi.username "root") (eq .chezmoi.os "android") (not (lookPath "sudo")) }}
+.auto_sudo
+.auto_sudo.zsh
+{{ end }}

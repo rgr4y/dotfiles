@@ -69,3 +69,11 @@ README.md
 .neofetch
 .vim/coc-settings.json
 {{ end }}
+
+# auto-sudo: pointless where the user can't/needn't sudo. Skip the alias list
+# and its loader for root, Android, and hosts with no sudo binary. Paired with
+# .chezmoiremove, which also deletes any copies already on disk.
+{{ if or (eq .chezmoi.username "root") (eq .chezmoi.os "android") (not (lookPath "sudo")) }}
+.auto_sudo
+.auto_sudo.zsh
+{{ end }}

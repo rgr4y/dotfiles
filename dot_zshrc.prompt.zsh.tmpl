@@ -10,29 +10,12 @@
 # Colors
 local _n='%f' _dim='%F{245}'
 local _c_host='%F{cyan}' _c_cwd='%F{33}'
-local _c_cwd_root='%F{red}' _c_git='%F{203}' _c_err='%F{196}' _c_time='%F{244}' _c_tag='%F{141}'
+local _c_cwd_root='%F{red}' _c_git='%F{203}' _c_err='%F{196}' _c_tag='%F{141}'
 
 setopt prompt_subst
 autoload -U add-zsh-hook
 zmodload zsh/datetime
 zmodload -F zsh/stat b:zstat
-
-# Command duration
-typeset -gF __ZP_TSTART=0.0
-preexec() { __ZP_TSTART=$EPOCHREALTIME }
-fmt_dur() {
-  (( __ZP_TSTART )) || return
-  local elapsed=$(( EPOCHREALTIME - __ZP_TSTART ))
-  local ms=$(( elapsed * 1000.0 ))
-  local ms_int=${ms%.*}
-  (( ms_int < 2000 )) && return
-  if (( ms_int < 60000 )); then
-    print -r -- "${_c_time}${ms_int}ms${_n}"
-  else
-    local s=$(( ms_int / 1000 ))
-    print -r -- "${_c_time}$(( s / 60 ))m$(( s % 60 ))s${_n}"
-  fi
-}
 
 {{- if ne .profile "bare" }}
 # Git (fast, cached) — omitted on bare/embedded (git often absent, saves a fork
@@ -92,6 +75,43 @@ mode_tag() {
   esac
 }
 
+{{- if and (ne .chezmoi.os "darwin") (not .is_vm) }}
+# ──────────────────────────────────────────────
+# CPU temperature tag (SoC thermal zones)
+# ──────────────────────────────────────────────
+# Hard-gated at chezmoi apply: omitted on VMs (no real thermal) and macOS.
+# Resolve zone paths ONCE by type — thermal_zone numbering can shuffle across
+# boots, so match cpub (big) + cpul (little) + generic cpu-thermal by name, not
+# index. Shows the hotter cluster. Pure-zsh $(<file) reads = no fork per prompt.
+# Returns nothing on hosts without these zones (graceful elsewhere).
+typeset -ga __ZP_CPU_TZ
+__zp_cpu_tz_init() {
+  local z t
+  for z in /sys/class/thermal/thermal_zone*/; do
+    [[ -r ${z}type && -r ${z}temp ]] || continue
+    t=$(<"${z}type")
+    [[ $t == cpub_thermal_zone || $t == cpu-thermal || $t == cpul_thermal_zone ]] && __ZP_CPU_TZ+=("${z}temp")
+  done
+}
+__zp_cpu_tz_init
+
+cpu_temp_tag() {
+  (( ${#__ZP_CPU_TZ} )) || return
+  local f v max=0
+  for f in $__ZP_CPU_TZ; do
+    v=$(<"$f") 2>/dev/null || continue
+    (( v > max )) && max=$v
+  done
+  (( max > 0 )) || return
+  local c=$(( max / 1000 )) col
+  if   (( c >= 75 )); then col='%F{196}'   # red   — near throttle
+  elif (( c >= 60 )); then col='%F{214}'   # amber — warm
+  else                     col='%F{114}'   # green — cool
+  fi
+  print -r -- "${col}${c}°C${_n}"
+}
+{{- end }}
+
 # Keymap refresh
 zle-keymap-select() { zle reset-prompt }
 zle -N zle-keymap-select
@@ -137,7 +157,7 @@ build_prompt() {
 
   local -a parts
   local p
-  for p in "$(mode_tag)" "$(venv_tag)" "$(jobs_tag)" "$(fmt_dur)" "$(exit_tag $st)"; do
+  for p in "$(mode_tag)"{{ if and (ne .chezmoi.os "darwin") (not .is_vm) }} "$(cpu_temp_tag)"{{ end }} "$(venv_tag)" "$(jobs_tag)" "$(exit_tag $st)"; do
     [[ -n $p ]] && parts+=("$p")
   done
   local right="${(j: • :)parts}"

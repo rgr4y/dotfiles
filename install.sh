@@ -790,6 +790,27 @@ echo
 # ──────────────────────────────────────────────
 # 4. Write .chezmoidata.yaml
 # ──────────────────────────────────────────────
+# Detect a virtual machine / container ONCE at first pull. Hard-gates the CPU
+# temperature prompt tag: VMs expose no real SoC thermal zones, so it's noise.
+# systemd-detect-virt is authoritative where present (exit 0 = virtualized);
+# fall back to DMI vendor strings and the cpuinfo hypervisor flag on non-systemd
+# hosts. Embedded SoCs (armbian etc.) return "not a VM" → temp tag shown.
+detect_vm() {
+  if command -v systemd-detect-virt >/dev/null 2>&1; then
+    systemd-detect-virt -q && return 0 || return 1
+  fi
+  local f
+  for f in /sys/class/dmi/id/product_name /sys/class/dmi/id/sys_vendor; do
+    [ -r "$f" ] || continue
+    case "$(cat "$f" 2>/dev/null)" in
+      *QEMU*|*VirtualBox*|*VMware*|*KVM*|*Virtual*|*Xen*|*Hyper-V*|*Bochs*) return 0 ;;
+    esac
+  done
+  grep -qi '^flags.*hypervisor' /proc/cpuinfo 2>/dev/null && return 0
+  return 1
+}
+IS_VM=false; detect_vm && IS_VM=true
+
 write_chezmoidata() {
   local src_dir
   src_dir="$(chezmoi source-path 2>/dev/null || echo "$HOME/.local/share/chezmoi")"
@@ -799,6 +820,7 @@ write_chezmoidata() {
 
   cat > "$DATA_FILE" << YAML
 profile: $PROFILE
+is_vm: $IS_VM
 modules:
   nvm: $(bool $MODULE_nvm)
   pyenv: $(bool $MODULE_pyenv)

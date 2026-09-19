@@ -222,6 +222,12 @@ fi
 {{- end }}
 [[ -f "$HOME/.zshrc.aliases.zsh" ]] && source "$HOME/.zshrc.aliases.zsh"
 [[ -f "$HOME/.aliases.local.zsh" ]] && source "$HOME/.aliases.local.zsh"
+{{- if not (or (eq .chezmoi.username "root") (eq .chezmoi.os "android") (not (lookPath "sudo"))) }}
+# auto-sudo aliases — only where a non-root user actually has sudo. For root,
+# Android, and sudo-less hosts this block is omitted and the files are deleted
+# from disk via .chezmoiremove (nothing left to source).
+[[ -f "$HOME/.auto_sudo.zsh" ]] && source "$HOME/.auto_sudo.zsh"
+{{- end }}
 
 {{ if .modules.nvm -}}
 # fnm completions
