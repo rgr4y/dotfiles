@@ -103,9 +103,9 @@ zle -N bracketed-paste bracketed-paste-magic
 # VSCode Terminal Detection
 # ──────────────────────────────────────────────
 if [[ "$TERM_PROGRAM" == "vscode" || "$TERMINAL_EMULATOR" == "JetBrains-JediTerm" ]]; then
-  {{ if .modules.nvm -}}
+  {{ if .modules.fnm -}}
   # fnm for vscode
-  [[ -f "$HOME/.zshrc.nvm.zsh" ]] && source "$HOME/.zshrc.nvm.zsh"
+  [[ -f "$HOME/.zshrc.fnm.zsh" ]] && source "$HOME/.zshrc.fnm.zsh"
   {{ end -}}
   {{ if .modules.bun -}}
   export BUN_INSTALL="$HOME/.bun"
@@ -116,11 +116,11 @@ if [[ "$TERM_PROGRAM" == "vscode" || "$TERMINAL_EMULATOR" == "JetBrains-JediTerm
 fi
 {{ end -}}
 
-{{ if .modules.nvm -}}
+{{ if .modules.fnm -}}
 # ──────────────────────────────────────────────
 # fnm (Fast Node Manager)
 # ──────────────────────────────────────────────
-[[ -f "$HOME/.zshrc.nvm.zsh" ]] && source "$HOME/.zshrc.nvm.zsh"
+[[ -f "$HOME/.zshrc.fnm.zsh" ]] && source "$HOME/.zshrc.fnm.zsh"
 {{ end -}}
 
 {{ if .modules.pyenv -}}
@@ -229,7 +229,7 @@ fi
 [[ -f "$HOME/.auto_sudo.zsh" ]] && source "$HOME/.auto_sudo.zsh"
 {{- end }}
 
-{{ if .modules.nvm -}}
+{{ if .modules.fnm -}}
 # fnm completions
 eval "$(fnm completions --shell zsh)"
 {{ end -}}

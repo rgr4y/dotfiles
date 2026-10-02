@@ -703,14 +703,14 @@ select_profile() {
 
 # Multi-select: spacebar checklist
 select_modules() {
-  local -a names=("nvm" "pyenv" "bun" "php" "copilot" "tmux" "fzf" "vscode")
+  local -a names=("fnm" "pyenv" "bun" "php" "copilot" "tmux" "fzf" "vscode")
   local -a descs=("fnm (Fast Node Manager)" "Python version manager" "Bun JS runtime" "PHP aliases (phpd, etc.)" "GitHub Copilot CLI" "Tmux + powerline" "Fuzzy finder keybindings" "VSCode terminal integration")
   local -a checked
 
   # defaults based on profile
   case "$PROFILE" in
     full) checked=(1 1 1 1 1 1 1 1) ;;          # everything
-    lite) checked=(1 0 0 0 0 0 1 1) ;;          # nvm + fzf + vscode
+    lite) checked=(1 0 0 0 0 0 1 1) ;;          # fnm + fzf + vscode
     bare) checked=(0 0 0 0 0 0 0 0) ;;          # nothing
   esac
 
@@ -772,7 +772,7 @@ if [[ $LOWPOWER -eq 1 ]]; then
   # Low-power hard-override: no menu — bare, all modules off.
   PROFILE="bare"
   echo "${BOLD}Profile:${RESET} bare ${DIM}(forced — low-power: $LOWPOWER_WHY)${RESET}"
-  for mod in nvm pyenv bun php copilot tmux fzf vscode; do eval "MODULE_${mod}=0"; done
+  for mod in fnm pyenv bun php copilot tmux fzf vscode; do eval "MODULE_${mod}=0"; done
 else
   select_profile
   select_modules
@@ -781,7 +781,7 @@ fi
 echo
 echo "${BOLD}Profile:${RESET} $PROFILE"
 echo "${BOLD}Modules:${RESET}"
-for mod in nvm pyenv bun php copilot tmux fzf vscode; do
+for mod in fnm pyenv bun php copilot tmux fzf vscode; do
   val="MODULE_${mod}"
   [[ ${!val} -eq 1 ]] && echo "  ${GREEN}✔${RESET} $mod" || echo "  ${DIM}✗ $mod${RESET}"
 done
@@ -822,7 +822,7 @@ write_chezmoidata() {
 profile: $PROFILE
 is_vm: $IS_VM
 modules:
-  nvm: $(bool $MODULE_nvm)
+  fnm: $(bool $MODULE_fnm)
   pyenv: $(bool $MODULE_pyenv)
   bun: $(bool $MODULE_bun)
   php: $(bool $MODULE_php)

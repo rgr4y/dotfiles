@@ -5,7 +5,7 @@ lowpower: false
 # host has SoC thermal zones).
 is_vm: false
 modules:
-  nvm: false
+  fnm: false
   pyenv: false
   bun: false
   php: false

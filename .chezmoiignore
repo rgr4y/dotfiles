@@ -1,3 +1,9 @@
+# Home always wins for these — inherently per-machine, home is a superset of
+# the repo copy, so let chezmoi leave them untouched instead of overwriting.
+.ssh/config
+.gitconfig
+.gitignore_global
+
 # Always ignore
 .DS_Store
 **/.netrwhist
@@ -65,9 +71,20 @@ README.md
 # NOTE: .zshrc.zi.zsh is NOT stripped — the bare profile already reduces it to a
 # direct zsh-autosuggestions + zsh-syntax-highlighting source (no zi manager).
 {{ if eq .profile "bare" }}
-.zshrc.nvm.zsh
+.zshrc.fnm.zsh
 .neofetch
 .vim/coc-settings.json
+{{ end }}
+
+# Clipboard shims are Linux/SSH-only: pbpaste falls back to xclip/xsel, and
+# pbcopy/pbcat use OSC52. macOS has native /usr/bin/pbpaste + /usr/bin/pbcopy,
+# and ~/.local/bin sits ahead of /usr/bin in PATH, so these shims would shadow
+# the real binaries (pbpaste would return empty). Paired with .chezmoiremove,
+# which deletes any copies a previous apply already left on disk.
+{{ if eq .chezmoi.os "darwin" }}
+.local/bin/pbpaste
+.local/bin/pbcopy
+.local/bin/pbcat
 {{ end }}
 
 # auto-sudo: pointless where the user can't/needn't sudo. Skip the alias list

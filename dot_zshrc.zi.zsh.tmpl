@@ -65,7 +65,7 @@ source "$HOME/.zi/bin/zi.zsh"
 # time); the ice modifier applies to the next zi command only.
 zi ice depth=1; zi light zsh-users/zsh-autosuggestions
 zi ice depth=1; zi light agkozak/zsh-z
-command -v sudo &>/dev/null && zi snippet OMZP::sudo
+[[ $EUID -ne 0 ]] && command -v sudo &>/dev/null && zi snippet OMZP::sudo
 
 {{ if eq .profile "full" -}}
 # Extra plugins (full profile)

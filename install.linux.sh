@@ -10,6 +10,26 @@ INSTALL_FULL="${1:-lite}"
 
 _log() { echo "  [debug] $*"; }
 
+# ──────────────────────────────────────────────
+# Banner — shows the profile + the current major step. Reused at every step.
+# ──────────────────────────────────────────────
+_banner() {
+  local step="$1"
+  local prof
+  prof="$(printf '%s' "$INSTALL_FULL" | tr '[:lower:]' '[:upper:]')"
+  local text="  dotfiles install   profile: ${prof}   step: ${step}  "
+  local width=${#text}
+  local bar
+  bar="$(printf '━%.0s' $(seq 1 "$width"))"
+  echo
+  echo "┏${bar}┓"
+  echo "┃${text}┃"
+  echo "┗${bar}┛"
+  echo
+}
+
+_banner "starting"
+
 if [[ -n "${RUNPOD_PUBLIC_IP:-}" ]]; then
   export COLUMNS=200
   _log "RunPod detected, COLUMNS=$COLUMNS"
@@ -31,7 +51,8 @@ BIN_CACHE="$CACHE_DIR/bin.tar.gz"
 DEB_CACHE="$CACHE_DIR/debs.tar.gz"
 LISTS_CACHE="$CACHE_DIR/apt-lists.tar.gz"
 ZSH_CACHE="$CACHE_DIR/zsh.tar.gz"
-CACHE_BINS=(/usr/local/bin/sesh /usr/local/bin/dua /usr/local/bin/broot)
+CACHE_BINS=
+
 _log "CACHE_DIR=$CACHE_DIR"
 _log "BIN_CACHE exists: $(test -f "$BIN_CACHE" && echo yes || echo no)"
 _log "DEB_CACHE exists: $(test -f "$DEB_CACHE" && echo yes || echo no)"
@@ -163,6 +184,7 @@ _install_bare() {
 
 # Bare profile: minimal path, then done (no generic pkg list, no broot/binaries).
 if [[ "$INSTALL_FULL" == "bare" ]]; then
+  _banner "bare packages"
   _install_bare
   exit 0
 fi
@@ -208,6 +230,7 @@ _apt_update_network() {
 # ──────────────────────────────────────────────
 # Install zsh first (needed before everything)
 # ──────────────────────────────────────────────
+_banner "installing zsh"
 if ! command -v zsh &>/dev/null; then
   if [[ -f "$ZSH_CACHE" ]]; then
     _log "Restoring zsh from binary cache..."
@@ -253,11 +276,12 @@ fi
 # ──────────────────────────────────────────────
 # Base packages (always installed)
 # ──────────────────────────────────────────────
+_banner "installing packages"
 BASE_PKGS=(
   git curl htop ncat netcat-openbsd aria2
-  command-not-found fzf ripgrep tcpdump
-  procps lsof wget pv file unzip eza
-  vim bat
+  fzf tcpdump
+  procps lsof wget pv unzip eza
+  vim
 )
 
 # ──────────────────────────────────────────────
@@ -267,7 +291,7 @@ FULL_PKGS=(
   iftop iotop btop tree screen rsync rclone
   dialog util-linux bind9-dnsutils
   iputils-ping iproute2 net-tools pigz nmap less
-  jq m4 iperf3 gh
+  jq m4 iperf3 gh file bat ripgrep command-not-found
 )
 
 # ──────────────────────────────────────────────
@@ -395,6 +419,7 @@ fi
 # ──────────────────────────────────────────────
 # Binary tools — restore from cache or download
 # ──────────────────────────────────────────────
+_banner "binary tools"
 _bins_all_present() {
   for b in "${CACHE_BINS[@]}"; do
     [[ -x "$b" ]] || return 1
@@ -441,48 +466,6 @@ elif [[ -f "$BIN_CACHE" ]]; then
 else
   _log "HEH"
   #_log "No bin cache found, will download individually"
-fi
-
-# ──────────────────────────────────────────────
-# broot (file navigator/manager)
-# ──────────────────────────────────────────────
-_log "broot=$(command -v broot 2>/dev/null || echo NOT_FOUND)"
-if ! command -v broot &>/dev/null; then
-  echo "Installing broot..."
-  BROOT_ARCH="$(uname -m)"
-  _log "BROOT_ARCH=$BROOT_ARCH"
-  case "$BROOT_ARCH" in
-    x86_64)  BROOT_TARGET="x86_64-unknown-linux-musl" ;;
-    aarch64) BROOT_TARGET="aarch64-unknown-linux-musl" ;;
-    *)       echo "  ⚠ broot: unsupported arch $BROOT_ARCH"; BROOT_TARGET="" ;;
-  esac
-  if [[ -n "$BROOT_TARGET" ]]; then
-    _log "Fetching broot release URL from GitHub API..."
-    BROOT_URL="$(curl -s https://api.github.com/repos/Canop/broot/releases/latest \
-      | grep "browser_download_url.*\.zip" \
-      | head -1 \
-      | cut -d '"' -f 4 || true)"
-    _log "BROOT_URL=${BROOT_URL:-EMPTY}"
-    if [[ -n "$BROOT_URL" ]]; then
-      tmp="$(mktemp -d)"
-      curl -sL "$BROOT_URL" -o "$tmp/broot.zip"
-      (cd "$tmp" && unzip -qo broot.zip)
-      BROOT_BIN="$(find "$tmp" -name "broot" -path "*${BROOT_TARGET}*" -type f 2>/dev/null | head -1)"
-      _log "BROOT_BIN=${BROOT_BIN:-EMPTY}"
-      _log "Zip contents: $(find "$tmp" -type f 2>/dev/null | head -10)"
-      if [[ -n "$BROOT_BIN" ]]; then
-        $SUDO install -m 755 "$BROOT_BIN" /usr/local/bin/broot
-        echo "✓ broot installed"
-      else
-        echo "  ⚠ broot: no binary found for $BROOT_TARGET in zip"
-      fi
-      rm -rf "$tmp"
-    else
-      echo "  ⚠ broot: could not find release URL"
-    fi
-  fi
-elif command -v broot &>/dev/null; then
-  echo "✓ broot already installed"
 fi
 
 # ──────────────────────────────────────────────

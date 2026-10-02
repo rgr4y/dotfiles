@@ -4,43 +4,61 @@
 # ──────────────────────────────────────────────
 
 # ── Git ──────────────────────────────────────
+
+# Detect default branch (main or master) for current repo
+_git_default_branch() {
+  if git rev-parse --verify --quiet refs/heads/main >/dev/null 2>&1; then
+    echo main
+  elif git rev-parse --verify --quiet refs/heads/master >/dev/null 2>&1; then
+    echo master
+  else
+    git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|origin/||' || echo main
+  fi
+}
+
 alias g='git'
 alias gp='git push'
 alias gpo='git push origin'
-alias gpom='git push origin master'
+gpom()  { git push origin "$(_git_default_branch)"; }
 alias gs='git status'
 alias gpl='git pull'
 alias gplr='git pull --rebase'
-alias gplom='git pull origin master'
+gplom() { git pull origin "$(_git_default_branch)"; }
 alias gcam='git commit -am'
 alias gcm='git commit -m'
-alias master='git checkout master'
-alias main='git checkout main'
+default() { git checkout "$(_git_default_branch)"; }
+alias master='default'
+alias main='default'
 alias dev='git checkout dev'
 alias staging='git checkout staging'
-alias gmd='gpo ; git checkout master ; git merge dev ; gpo'
-alias gma='gpo ; git checkout dev ; git merge master ; gpo ; git checkout master'
-alias gmm='dev; git merge master ; gpo'
+gmd() { local b=$(_git_default_branch); gpo; git checkout "$b"; git merge dev; gpo; }
+gma() { local b=$(_git_default_branch); gpo; git checkout dev; git merge "$b"; gpo; git checkout "$b"; }
+gmm() { local b=$(_git_default_branch); dev; git merge "$b"; gpo; }
 alias gtrack='git branch --set-upstream-to=origin/$(git branch --show-current)'
 
 # ── Navigation / General ────────────────────
-alias more='less -FX'
+alias less='less -FX --mouse'
+alias more='less'
 alias tmls='tmux list-sessions'
-alias ehost='sudo vim /etc/hosts'
+alias ehost='vim ~/.ssh/known_hosts'
+alias econ='vim ~/.ssh/config'
 alias logs='lnav'
-alias history='history 1'
 
 if command -v eza &>/dev/null; then
-  alias l='eza --classify --icons --group-directories-first'
-  alias la='eza -a --icons --group-directories-first'
-  alias ll='eza -alh --git --header --icons --group-directories-first'
-  alias ls='eza --icons --group-directories-first'
-  alias tree='eza --tree --icons --group-directories-first'
+  alias ls='eza --icons --group-directories-first --git --header'
+  alias l='ls -1'
+  alias la='ls -A'
+  alias ll='eza -lah --icons --group-directories-first --git --header'
+  lt() {
+    eza --tree --level=2 --header --color=always --icons "$@" | less -R
+  }
 else
-  alias l='ls -CF'
+  alias ls='ls -CF'
+  alias l='ls -1'
   alias la='ls -A'
   alias ll='ls -alh'
 fi
+
 alias ..='cd ..'
 alias ...='cd ../..'
 alias ....='cd ../../..'
@@ -77,7 +95,6 @@ pubkey() {
   return 1
 }
 alias wireshark='/Applications/Wireshark.app/Contents/MacOS/Wireshark'
-alias sudo="/usr/bin/sudo -s"
 alias lock="sudo chflags schg"
 alias unlock="sudo chflags noschg"
 
@@ -90,6 +107,9 @@ phpstorm() {
   open -a PhpStorm "${1:-.}"
 }
 
+# kk — correct the last command via apfel (local Apple Intelligence)
+# Loads the corrected command into the next prompt buffer via `print -z`.
+# HIST_VERIFY is set, so you still hit Enter to execute.
 kk() {
   local last
   last="$(fc -ln -1 2>/dev/null | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
@@ -126,6 +146,7 @@ kk() {
   fi
   rm -f "$stderr_file"
 
+  # Strip code fences, backticks, leading prompt chars, surrounding whitespace.
   fixed="${fixed//$'\r'/}"
   fixed="$(print -r -- "$fixed" | sed -e 's/^```[a-zA-Z]*//' -e 's/```$//' -e 's/^[[:space:]]*[$#][[:space:]]*//' -e 's/^`//' -e 's/`$//' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
 
@@ -159,10 +180,92 @@ if [ -n "$ZSH_VERSION" ]; then
     rsync -aHAXv "$src" "$dst"
   }
 
+  # Smart-short path with workspace→ws shortening
+  short_pwd() {
+    local p; p=$(print -P "%~")
+    print -r -- "${p/workspace/ws}"
+  }
+
   alias zr='source $HOME/.zshrc; echo "Sourced $HOME/.zshrc"'
 fi
 
-alias bigfiles='du -h -d 3 . 2>/dev/null | sort -rh | head -20'
+gitinit() {
+  local name="${1:-$(basename "$PWD")}"
+
+  if [ -d .git ]; then
+    echo "gitinit: already a git repo, bailing" >&2
+    return 1
+  fi
+
+  git init
+  mkdir -p .claude
+
+  # README
+  echo "# $name" > README.md
+
+  # .gitignore — Node, Python, Docker, macOS, editors
+  cat > .gitignore << 'EOF'
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.npm
+.yarn-integrity
+dist/
+.next/
+.nuxt/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+env/
+.env
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Docker
+.docker/
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Editors
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Logs
+logs/
+*.log
+
+# Claude
+.claude/
+EOF
+
+  git add .
+  git commit -m "Initial commit"
+
+  echo ""
+  echo "✓ $name initialized"
+  echo "  README.md, .gitignore, .claude/ ready"
+}
 
 # Filtered `ip addr` — drop utun*/llw* noise, link-local, and IP-less/inactive ifaces.
 # Usage: ipa            (like `ip addr`, filtered)
@@ -200,6 +303,60 @@ ipa() {
     }
     END { flush() }
   '
+}
+
+ips() {
+  ip a | grep inet | grep -v "fe80" | grep -v "127.0."
+}
+
+devflat() {
+  local b=$(_git_default_branch)
+  for branch in "$b" staging dev; do
+    git checkout "$branch" && git pull --rebase || return 1
+  done
+  git checkout dev
+  git status
+}
+
+pages() { for _ in {1..5}; do curl -sSw '%header{location}\n' https://indieblog.page/random | sed 's/.utm.*//'; done }
+
+# List of file extensions in . that respect gitignore rules, from most to least, top 20
+rag-topfiles() {
+  git ls-files --cached --others --exclude-standard \
+  | awk -F. 'NF>1 {ext=$NF; count[ext]++} END {for (e in count) print count[e], e}' | sort -rn | head -20
+}
+
+dirNav () { path2=${1:-.}; cd "$path2"; pwd; ls -CF; }
+alias t='dirNav'
+alias history='history 1'
+
+rgh() { rg --heading --line-number "$@" --color always --max-columns-preview -M 200; }
+alias rg='rg --color always -M 200 --max-columns-preview'
+
+ap () { ask -s "$*"; }
+alias apw='noglob ap'
+
+# ask ZSH integration — Ctrl+O: type description, hit Ctrl+O, get command
+_ask_zsh() {
+if [[ -n "$BUFFER" ]]; then
+    _ask_prev_cmd=$BUFFER
+    BUFFER+=" ⌛"
+    zle -I && zle redisplay
+    BUFFER=$(ask --shell --no-stream <<< "$_ask_prev_cmd")
+    zle end-of-line
+fi
+}
+zle -N _ask_zsh
+bindkey ^O _ask_zsh
+
+alias zl="vim ~/.zshrc.local.zsh && source ~/.zshrc.local.zsh"
+
+alias claudepeers='claude --dangerously-load-development-channels server:claude-peers --dangerously-skip-permissions'
+alias bigfiles='du -h -d 3 . 2>/dev/null | sort -rh | head -20'
+alias http-server='python3 -m "http.server" 9000'
+
+php() {
+  $HOME/bin/php "$@"
 }
 
 # ── The Classics ────────────────────────────

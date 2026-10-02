@@ -8,3 +8,12 @@
 .auto_sudo
 .auto_sudo.zsh
 {{ end }}
+
+# clipboard shims: macOS has native pbpaste/pbcopy and ~/.local/bin is ahead of
+# /usr/bin in PATH, so these shadow the real binaries. .chezmoiignore stops them
+# being re-created; this deletes copies left by a previous apply.
+{{ if eq .chezmoi.os "darwin" }}
+.local/bin/pbpaste
+.local/bin/pbcopy
+.local/bin/pbcat
+{{ end }}
