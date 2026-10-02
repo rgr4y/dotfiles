@@ -90,7 +90,7 @@ __zp_cpu_tz_init() {
   for z in /sys/class/thermal/thermal_zone*/; do
     [[ -r ${z}type && -r ${z}temp ]] || continue
     t=$(<"${z}type")
-    [[ $t == cpub_thermal_zone || $t == cpu-thermal || $t == cpul_thermal_zone ]] && __ZP_CPU_TZ+=("${z}temp")
+    [[ $t == cpu_thermal_zone || $t == cpub_thermal_zone || $t == cpu-thermal || $t == cpul_thermal_zone ]] && __ZP_CPU_TZ+=("${z}temp")
   done
 }
 __zp_cpu_tz_init
