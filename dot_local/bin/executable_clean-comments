@@ -10,4 +10,14 @@ if [ -z "$FILE" ]; then
   exit 1
 fi
 
-gsed -e '/^[[:space:]]*[#;]/d' -e '/^[[:space:]]*$/d' -i "$FILE"
+if command -v sed >/dev/null 2>&1; then
+  SED=sed
+elif command -v gsed >/dev/null 2>&1; then
+  SED=gsed
+else
+  echo "clean-comments: neither sed nor gsed found" >&2
+  exit 1
+fi
+
+# -i.bak form works on both BSD and GNU sed
+"$SED" -i.bak -e '/^[[:space:]]*[#;]/d' -e '/^[[:space:]]*$/d' "$FILE" && rm -f "$FILE.bak"
