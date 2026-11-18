@@ -28,12 +28,13 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# ── Detect constrained hardware (armv6/armv7, opkg routers) → default tiny ──
+# ── Detect constrained hardware (armv6/armv7, opkg/apk) → default tiny ─────
 IS_TINY=0
 case "$(uname -m 2>/dev/null)" in
   armv6*|armv7*|armhf) IS_TINY=1 ;;
 esac
 command -v opkg &>/dev/null && IS_TINY=1
+command -v apk &>/dev/null && IS_TINY=1
 
 # ── Detect system capabilities (once, up front) ─────────────────────────────
 CAN_INSTALL=0
@@ -50,7 +51,10 @@ PM=""
 INSTALL=""
 _APT_UPDATED=0
 
-if command -v apt-get &>/dev/null; then
+if command -v apk &>/dev/null; then
+  PM="apk"
+  INSTALL="$SUDO apk add --no-cache"
+elif command -v apt-get &>/dev/null; then
   PM="apt"
   INSTALL="$SUDO apt-get install -y"
 elif command -v yum &>/dev/null; then
@@ -130,6 +134,14 @@ if ! command -v git &>/dev/null; then
 fi
 echo "[ing] git ✓"
 
+# ── Gate: curl (chezmoi installer + version check; minimal Alpine lacks it) ─
+if ! command -v curl &>/dev/null; then
+  if ! _try_install curl; then
+    echo "[ing] FATAL: can't install curl (no package manager or no sudo)"
+    exit 1
+  fi
+fi
+
 # ── chezmoi ──────────────────────────────────────────────────────────────────
 export PATH="$HOME/.local/bin:$PATH"
 
@@ -177,7 +189,9 @@ if [[ "$HAS_ZSH" -eq 1 ]]; then
   echo "[ing] zsh ✓"
   ZSH_PATH="$(command -v zsh)"
   if [ "$SHELL" != "$ZSH_PATH" ]; then
-    if [[ "$CAN_INSTALL" -eq 1 ]]; then
+    # busybox has no chsh; Alpine ships it in shadow
+    command -v chsh &>/dev/null || _try_install shadow || true
+    if [[ "$CAN_INSTALL" -eq 1 ]] && command -v chsh &>/dev/null; then
       $SUDO chsh -s "$ZSH_PATH" "$(whoami)" || true
       echo "[ing] default shell → zsh"
     else
