@@ -1,5 +1,6 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/bin/sh
+# POSIX sh: must run under dash / busybox ash (curl ... | sh on Alpine has no bash)
+set -eu
 
 DEFAULT_GITHUB_USERNAME=rgr4y
 
@@ -8,13 +9,13 @@ AUTO=0
 PROFILE=""
 GITHUB_USERNAME=""
 
-while [[ $# -gt 0 ]]; do
+while [ $# -gt 0 ]; do
   case "$1" in
     --auto) AUTO=1; shift ;;
     --tiny) PROFILE="tiny"; shift ;;
     --lite) PROFILE="lite"; shift ;;
     --full) PROFILE="full"; shift ;;
-    --user) [[ $# -lt 2 ]] && { echo "[ing] --user requires an argument"; exit 1; }
+    --user) [ $# -ge 2 ] || { echo "[ing] --user requires an argument"; exit 1; }
             GITHUB_USERNAME="$2"; shift 2 ;;
     -h|--help)
       echo "Usage: ing.sh [--auto] [--tiny|--lite|--full] [--user NAME]"
@@ -33,16 +34,16 @@ IS_TINY=0
 case "$(uname -m 2>/dev/null)" in
   armv6*|armv7*|armhf) IS_TINY=1 ;;
 esac
-command -v opkg &>/dev/null && IS_TINY=1
-command -v apk &>/dev/null && IS_TINY=1
+command -v opkg >/dev/null 2>&1 && IS_TINY=1
+command -v apk >/dev/null 2>&1 && IS_TINY=1
 
 # ── Detect system capabilities (once, up front) ─────────────────────────────
 CAN_INSTALL=0
 SUDO=""
 
-if [[ "$(id -u)" -eq 0 ]]; then
+if [ "$(id -u)" -eq 0 ]; then
   CAN_INSTALL=1
-elif command -v sudo &>/dev/null && sudo -n true 2>/dev/null; then
+elif command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
   CAN_INSTALL=1
   SUDO="sudo"
 fi
@@ -51,28 +52,28 @@ PM=""
 INSTALL=""
 _APT_UPDATED=0
 
-if command -v apk &>/dev/null; then
+if command -v apk >/dev/null 2>&1; then
   PM="apk"
   INSTALL="$SUDO apk add --no-cache"
-elif command -v apt-get &>/dev/null; then
+elif command -v apt-get >/dev/null 2>&1; then
   PM="apt"
   INSTALL="$SUDO apt-get install -y"
-elif command -v yum &>/dev/null; then
+elif command -v yum >/dev/null 2>&1; then
   PM="yum"
   INSTALL="$SUDO yum install -y"
-elif command -v pacman &>/dev/null; then
+elif command -v pacman >/dev/null 2>&1; then
   PM="pacman"
   INSTALL="$SUDO pacman -S --noconfirm"
-elif command -v brew &>/dev/null; then
+elif command -v brew >/dev/null 2>&1; then
   PM="brew"
   INSTALL="brew install"
   CAN_INSTALL=1
 fi
 
 _try_install() {
-  [[ "$CAN_INSTALL" -eq 0 || -z "$PM" ]] && return 1
+  [ "$CAN_INSTALL" -eq 1 ] && [ -n "$PM" ] || return 1
   echo "[ing] installing $1..."
-  if [[ "$PM" == "apt" && "$_APT_UPDATED" -eq 0 ]]; then
+  if [ "$PM" = "apt" ] && [ "$_APT_UPDATED" -eq 0 ]; then
     $SUDO apt-get update -qq
     _APT_UPDATED=1
   fi
@@ -81,25 +82,36 @@ _try_install() {
 
 echo "[ing] system: pm=${PM:-none} sudo=${CAN_INSTALL}"
 
+# read with 10s timeout where the shell supports -t (bash, busybox ash);
+# dash has no -t, so it waits indefinitely there.
+# shellcheck disable=SC3045  # read -t is guarded by the probe
+_ask() {
+  if (read -t 0 _x </dev/null) 2>/dev/null || [ $? -eq 1 ]; then
+    read -r -t 10 "$1" </dev/tty
+  else
+    read -r "$1" </dev/tty
+  fi
+}
+
 # ── Prompts (skipped in --auto) ──────────────────────────────────────────────
-if [[ "$AUTO" -eq 1 ]]; then
+if [ "$AUTO" -eq 1 ]; then
   GITHUB_USERNAME="${GITHUB_USERNAME:-$DEFAULT_GITHUB_USERNAME}"
-  if [[ -z "$PROFILE" ]]; then
-    [[ $IS_TINY -eq 1 ]] && PROFILE="tiny" || PROFILE="full"
+  if [ -z "$PROFILE" ]; then
+    [ $IS_TINY -eq 1 ] && PROFILE="tiny" || PROFILE="full"
   fi
 else
-  if [[ -z "$GITHUB_USERNAME" ]]; then
+  if [ -z "$GITHUB_USERNAME" ]; then
     if [ -t 0 ] && [ -r /dev/tty ]; then
       printf "[ing] GitHub username (default: %s): " "$DEFAULT_GITHUB_USERNAME" > /dev/tty
-      read -r -t 10 GITHUB_USERNAME < /dev/tty || printf '\n[ing] timed out — using default\n' > /dev/tty
+      _ask GITHUB_USERNAME || printf '\n[ing] timed out — using default\n' > /dev/tty
     fi
     GITHUB_USERNAME="${GITHUB_USERNAME:-$DEFAULT_GITHUB_USERNAME}"
   fi
 
-  if [[ -z "$PROFILE" ]]; then
+  if [ -z "$PROFILE" ]; then
     _choice=""
     # Preselect tiny on constrained hardware, else full
-    if [[ $IS_TINY -eq 1 ]]; then _default_choice=1; _default_name=tiny
+    if [ $IS_TINY -eq 1 ]; then _default_choice=1; _default_name=tiny
     else _default_choice=3; _default_name=full; fi
     if [ -t 0 ] && [ -r /dev/tty ]; then
       {
@@ -109,7 +121,7 @@ else
         echo "  3) Full — everything (recommended for capable systems)"
         printf "[ing] Enter 1-3 (default: %s in 10s): " "$_default_name"
       } > /dev/tty
-      read -r -t 10 _choice < /dev/tty || printf '\n[ing] timed out — defaulting to %s\n' "$_default_name" > /dev/tty
+      _ask _choice || printf '\n[ing] timed out — defaulting to %s\n' "$_default_name" > /dev/tty
     fi
     case "${_choice:-$_default_choice}" in
       1|tiny|TINY|Tiny|bare|BARE|Bare) PROFILE="tiny" ;;
@@ -124,7 +136,7 @@ echo "[ing] GitHub → ${GITHUB_USERNAME}"
 echo "[ing] Profile → ${PROFILE}"
 
 # ── Gate: git (hard requirement) ─────────────────────────────────────────────
-if ! command -v git &>/dev/null; then
+if ! command -v git >/dev/null 2>&1; then
   echo "[ing] git not found — attempting install..."
   if ! _try_install git; then
     echo "[ing] FATAL: can't install git (no package manager or no sudo)"
@@ -135,7 +147,7 @@ fi
 echo "[ing] git ✓"
 
 # ── Gate: curl (chezmoi installer + version check; minimal Alpine lacks it) ─
-if ! command -v curl &>/dev/null; then
+if ! command -v curl >/dev/null 2>&1; then
   if ! _try_install curl; then
     echo "[ing] FATAL: can't install curl (no package manager or no sudo)"
     exit 1
@@ -148,9 +160,16 @@ export PATH="$HOME/.local/bin:$PATH"
 _install_chezmoi() {
   mkdir -p "$HOME/.local/bin"
   sh -c "$(curl -fsLS get.chezmoi.io)" -- -b "$HOME/.local/bin"
+  # root: system-wide binary instead of /root/.local/bin
+  if [ "$(id -u)" -eq 0 ]; then
+    mkdir -p /usr/local/bin
+    mv -f "$HOME/.local/bin/chezmoi" /usr/local/bin/chezmoi
+    echo "[ing] chezmoi → /usr/local/bin"
+  fi
+  hash -r
 }
 
-if ! command -v chezmoi &>/dev/null; then
+if ! command -v chezmoi >/dev/null 2>&1; then
   echo "[ing] chezmoi not found — installing..."
   _install_chezmoi
 else
@@ -158,8 +177,8 @@ else
   if find "$_chezmoi_bin" -mtime +365 -print -quit 2>/dev/null | grep -q .; then
     _cur="$(chezmoi --version 2>/dev/null | grep -o 'v[0-9][0-9.]*' | head -1)"
     _lat="$(curl -fsL https://api.github.com/repos/twpayne/chezmoi/releases/latest 2>/dev/null \
-            | grep -o '"tag_name": *"[^"]*"' | head -1 | grep -o 'v[0-9][0-9.]*')"
-    if [[ -n "$_lat" && "$_cur" != "$_lat" ]]; then
+            | grep -o '"tag_name": *"[^"]*"' | head -1 | grep -o 'v[0-9][0-9.]*')" || true
+    if [ -n "$_lat" ] && [ "$_cur" != "$_lat" ]; then
       echo "[ing] chezmoi ${_cur} → ${_lat} — upgrading..."
       _install_chezmoi
     else
@@ -174,24 +193,24 @@ echo "[ing] chezmoi ✓"
 # ── Gate: zsh (install early so we can exec into it) ────────────────────────
 HAS_ZSH=0
 
-if command -v zsh &>/dev/null; then
+if command -v zsh >/dev/null 2>&1; then
   HAS_ZSH=1
 else
   echo "[ing] zsh not found — attempting install..."
-  if _try_install zsh && command -v zsh &>/dev/null; then
+  if _try_install zsh && command -v zsh >/dev/null 2>&1; then
     HAS_ZSH=1
   else
     echo "[ing] WARNING: can't install zsh — shell customization skipped"
   fi
 fi
 
-if [[ "$HAS_ZSH" -eq 1 ]]; then
+if [ "$HAS_ZSH" -eq 1 ]; then
   echo "[ing] zsh ✓"
   ZSH_PATH="$(command -v zsh)"
-  if [ "$SHELL" != "$ZSH_PATH" ]; then
+  if [ "${SHELL:-}" != "$ZSH_PATH" ]; then
     # busybox has no chsh; Alpine ships it in shadow
-    command -v chsh &>/dev/null || _try_install shadow || true
-    if [[ "$CAN_INSTALL" -eq 1 ]] && command -v chsh &>/dev/null; then
+    command -v chsh >/dev/null 2>&1 || _try_install shadow || true
+    if [ "$CAN_INSTALL" -eq 1 ] && command -v chsh >/dev/null 2>&1; then
       $SUDO chsh -s "$ZSH_PATH" "$(whoami)" || true
       echo "[ing] default shell → zsh"
     else
@@ -209,9 +228,9 @@ data:
 EOF
 
 _DOTFILES_CHANGED=0
-if [[ -d "$HOME/.local/share/chezmoi/.git" ]]; then
+if [ -d "$HOME/.local/share/chezmoi/.git" ]; then
   _cm_out="$(chezmoi update --exclude=scripts 2>&1)" || true
-  [[ -n "$_cm_out" ]] && _DOTFILES_CHANGED=1
+  [ -z "$_cm_out" ] || _DOTFILES_CHANGED=1
 else
   chezmoi init "$GITHUB_USERNAME"
   chezmoi apply --exclude=scripts
@@ -220,22 +239,22 @@ fi
 echo "[ing] dotfiles deployed ✓"
 
 _preinstall_zi_plugins() {
-  [[ "$HAS_ZSH" -eq 1 ]] || return 0
-  [[ -f "$HOME/.zshrc.zi.zsh" ]] || return 0
+  [ "$HAS_ZSH" -eq 1 ] || return 0
+  [ -f "$HOME/.zshrc.zi.zsh" ] || return 0
 
-  local log="$HOME/.zi-preinstall.log"
-  local lock="$HOME/.zi-preinstall.lock"
+  _zi_log="$HOME/.zi-preinstall.log"
+  _zi_lock="$HOME/.zi-preinstall.lock"
 
   (
-    if ! mkdir "$lock" 2>/dev/null; then
+    trap '' HUP
+    if ! mkdir "$_zi_lock" 2>/dev/null; then
       exit 0
     fi
-    trap 'rmdir "$lock"' EXIT
+    trap 'rmdir "$_zi_lock"' EXIT
 
     export GIT_TERMINAL_PROMPT=0
     zsh -f "$HOME/.zshrc.zi.zsh"
-  ) >"$log" 2>&1 &
-  disown "$!" 2>/dev/null || true
+  ) >"$_zi_log" 2>&1 &
 }
 
 _preinstall_zi_plugins
@@ -258,14 +277,16 @@ rm -f "$HOME/.ing-bootstrap.done"
 rm -f "$HOME/.zlogin"
 
 # ── Package scripts (async if interactive, sync otherwise) ──────────────────
+# install.linux.sh and the fnm installer are bash scripts.
 _run_scripts() {
   DEBIAN_FRONTEND=noninteractive chezmoi apply
 }
 
-if [[ -t 0 ]]; then
+if ! command -v bash >/dev/null 2>&1 && ! _try_install bash; then
+  echo "[ing] WARNING: no bash and can't install it — skipping package scripts"
+elif [ -t 0 ]; then
   echo "[ing] installing packages in background (log: ~/.ing-install.log)..."
-  _run_scripts &>"$HOME/.ing-install.log" &
-  disown
+  ( trap '' HUP; _run_scripts ) >"$HOME/.ing-install.log" 2>&1 &
 else
   echo "[ing] installing packages..."
   _run_scripts
@@ -274,17 +295,17 @@ fi
 # ── Launch shell ────────────────────────────────────────────────────────────
 _parent_comm="$(ps -p "$PPID" -o comm= 2>/dev/null || true)"
 _zsh_already_active=0
-[[ "$_parent_comm" == *zsh* ]] && _zsh_already_active=1
+case "$_parent_comm" in *zsh*) _zsh_already_active=1 ;; esac
 
-if [[ -n "${SSH_TTY:-}" && -z "${TMUX:-}" && "$_zsh_already_active" -eq 0 ]]; then
+if [ -n "${SSH_TTY:-}" ] && [ -z "${TMUX:-}" ] && [ "$_zsh_already_active" -eq 0 ]; then
   echo "[ing] bootstrap complete; disconnecting so you can reconnect..."
   sleep 1
   kill -HUP "$PPID"
   exit 0
 fi
 
-if [[ "$HAS_ZSH" -eq 1 && "${_DOTFILES_CHANGED:-0}" -eq 1 ]]; then
-  if [[ "$_zsh_already_active" -eq 1 ]]; then
+if [ "$HAS_ZSH" -eq 1 ] && [ "${_DOTFILES_CHANGED:-0}" -eq 1 ]; then
+  if [ "$_zsh_already_active" -eq 1 ]; then
     echo "[ing] zsh already running — run 'source ~/.zshrc' to reload config"
   else
     echo "[ing] launching fresh zsh..."
