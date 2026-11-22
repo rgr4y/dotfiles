@@ -4,10 +4,10 @@ SCRIPTS := ing.sh abc.sh
 
 .PHONY: deploy
 deploy:
-	@changed=""; \
+	@changed=""; stamp="# modified: $$(date '+%Y-%m-%d %H:%M:%S %Z')"; \
 	for f in $(SCRIPTS); do \
-	  if cmp -s dot_local/bin/$$f $(PUB)/$$f; then echo "[deploy] $$f unchanged"; \
-	  else cp dot_local/bin/$$f $(PUB)/$$f && echo "[deploy] $$f -> $(PUB)/$$f" && changed="$$changed $$f"; fi; \
+	  if grep -v '^# modified: ' $(PUB)/$$f 2>/dev/null | cmp -s dot_local/bin/$$f -; then echo "[deploy] $$f unchanged"; \
+	  else { cat dot_local/bin/$$f; echo "$$stamp"; } > $(PUB)/$$f && echo "[deploy] $$f -> $(PUB)/$$f ($$stamp)" && changed="$$changed $$f"; fi; \
 	done; \
 	[ -n "$$changed" ] || { echo "[deploy] nothing to publish"; exit 0; }; \
 	cd $(SITE) && git add $(addprefix public/,$(SCRIPTS)) && \
