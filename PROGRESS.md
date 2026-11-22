@@ -11,4 +11,4 @@
 - **Outcome:** `ing.sh` on OpenWrt 25.12 (dropbear, apk, 22MB overlay) chooses how to clone. If the forwarded agent works with GitHub, it clones over ssh (`ssh -y`, `GIT_SSH_VARIANT=simple`). Otherwise it uses https, and if git has no `git-remote-https` it sets chezmoi `useBuiltinGit: true` instead of installing git-http. Also: chezmoi is moved into a dir on PATH, `id -un` replaces `whoami`, and PATH dedupe (`typeset -U` in zshrc).
 - **`make`:** stamps `# modified:` on published scripts and pushes lolf.art. It then checks the live stamps and runs `wrangler deploy` if any script is stale. It's idempotent. AGENTS.md requires running it before ending a session.
 - **Verification:** Alpine container with no https helper: plain git fails, builtin-git init+update OK. On vantr3k, `ssh -T git@github.com` and `git ls-remote` over the forwarded agent both work. `make` → `live ✓`.
-- **Not run:** the ssh clone branch of ing.sh end to end on the router.
+- **Verified by Rob:** clean install on vantr3k via `curl -sL lolf.art/ing.sh | sh`.
