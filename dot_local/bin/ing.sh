@@ -180,11 +180,15 @@ SHIM
   fi
   PATH="${_shim:+$_shim:}$PATH" sh -c "$(curl -fsLS get.chezmoi.io)" -- -b "$HOME/.local/bin"
   [ -z "$_shim" ] || rm -rf "$_shim"
-  # root: system-wide binary instead of /root/.local/bin
+  # root: system-wide binary instead of /root/.local/bin. OpenWrt's PATH has
+  # no /usr/local/bin, so take the first system dir that's actually on PATH.
   if [ "$(id -u)" -eq 0 ]; then
-    mkdir -p /usr/local/bin
-    mv -f "$HOME/.local/bin/chezmoi" /usr/local/bin/chezmoi
-    echo "[ing] chezmoi → /usr/local/bin"
+    case ":$PATH:" in
+      *:/usr/local/bin:*) _cm_dir=/usr/local/bin ;;
+      *) _cm_dir=/usr/bin ;;
+    esac
+    mv -f "$HOME/.local/bin/chezmoi" "$_cm_dir/chezmoi"
+    echo "[ing] chezmoi → $_cm_dir"
   fi
   hash -r
 }
@@ -231,8 +235,12 @@ if [ "$HAS_ZSH" -eq 1 ]; then
     # busybox has no chsh; Alpine ships it in shadow
     command -v chsh >/dev/null 2>&1 || _try_install shadow || true
     if [ "$CAN_INSTALL" -eq 1 ] && command -v chsh >/dev/null 2>&1; then
-      $SUDO chsh -s "$ZSH_PATH" "$(whoami)" || true
-      echo "[ing] default shell → zsh"
+      # busybox may lack whoami; id -un is POSIX
+      if $SUDO chsh -s "$ZSH_PATH" "$(id -un)"; then
+        echo "[ing] default shell → zsh"
+      else
+        echo "[ing] WARNING: chsh failed — run manually: chsh -s $ZSH_PATH"
+      fi
     else
       echo "[ing] no sudo — run manually: chsh -s $ZSH_PATH"
     fi
