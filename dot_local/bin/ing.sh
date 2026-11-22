@@ -157,9 +157,29 @@ fi
 # ── chezmoi ──────────────────────────────────────────────────────────────────
 export PATH="$HOME/.local/bin:$PATH"
 
+# measured before chezmoi lands so its own size doesn't count
+_free_kb="$(df -Pk "$HOME" 2>/dev/null | awk 'NR==2{print $4}')"
+_LOW_DISK=0
+[ -n "$_free_kb" ] && [ "$_free_kb" -lt 1048576 ] && _LOW_DISK=1
+
 _install_chezmoi() {
   mkdir -p "$HOME/.local/bin"
-  sh -c "$(curl -fsLS get.chezmoi.io)" -- -b "$HOME/.local/bin"
+  # get.chezmoi.io calls `install -d DIR` / `install -- SRC DIR/`; busybox
+  # builds (OpenWrt, slim Alpine) may lack the applet, so shim it on PATH.
+  _shim=""
+  if ! command -v install >/dev/null 2>&1; then
+    _shim="$(mktemp -d)"
+    cat > "$_shim/install" <<'SHIM'
+#!/bin/sh
+[ "$1" = -d ] && { shift; exec mkdir -p "$@"; }
+[ "$1" = -- ] && shift
+cp "$1" "$2" && chmod 755 "$2/${1##*/}"
+SHIM
+    chmod 755 "$_shim/install"
+    echo "[ing] no 'install' binary — using cp shim"
+  fi
+  PATH="${_shim:+$_shim:}$PATH" sh -c "$(curl -fsLS get.chezmoi.io)" -- -b "$HOME/.local/bin"
+  [ -z "$_shim" ] || rm -rf "$_shim"
   # root: system-wide binary instead of /root/.local/bin
   if [ "$(id -u)" -eq 0 ]; then
     mkdir -p /usr/local/bin
@@ -279,11 +299,20 @@ rm -f "$HOME/.zlogin"
 # ── Package scripts (async if interactive, sync otherwise) ──────────────────
 # install.linux.sh and the fnm installer are bash scripts.
 _run_scripts() {
-  DEBIAN_FRONTEND=noninteractive chezmoi apply
+  DEBIAN_FRONTEND=noninteractive chezmoi apply || echo "[ing] WARNING: chezmoi apply failed"
+  _cleanup_chezmoi
+}
+
+# <1GB free: chezmoi (~40MB) is bootstrap-only; re-running ing.sh reinstalls it.
+_cleanup_chezmoi() {
+  [ "$_LOW_DISK" -eq 1 ] || return 0
+  _cm="$(command -v chezmoi)" || return 0
+  rm -f "$_cm" && echo "[ing] low disk (${_free_kb}KB free) — removed $_cm"
 }
 
 if ! command -v bash >/dev/null 2>&1 && ! _try_install bash; then
   echo "[ing] WARNING: no bash and can't install it — skipping package scripts"
+  _cleanup_chezmoi
 elif [ -t 0 ]; then
   echo "[ing] installing packages in background (log: ~/.ing-install.log)..."
   ( trap '' HUP; _run_scripts ) >"$HOME/.ing-install.log" 2>&1 &
