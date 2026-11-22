@@ -155,7 +155,7 @@ if ! command -v curl >/dev/null 2>&1; then
 fi
 
 # ── chezmoi ──────────────────────────────────────────────────────────────────
-export PATH="$HOME/.local/bin:$PATH"
+case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) export PATH="$HOME/.local/bin:$PATH" ;; esac
 
 # measured before chezmoi lands so its own size doesn't count
 _free_kb="$(df -Pk "$HOME" 2>/dev/null | awk 'NR==2{print $4}')"

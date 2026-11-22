@@ -6,6 +6,7 @@ export PATH="$HOME/bin:$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/lo
 {{- else }}
 export PATH="$HOME/bin:$HOME/.local/bin:/usr/local/bin:/usr/local/sbin:$PATH"
 {{- end }}
+typeset -U path PATH  # dedupe: login profiles + re-sourcing stack duplicates
 
 # ──────────────────────────────────────────────
 # 2. History
