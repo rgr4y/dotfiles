@@ -248,19 +248,51 @@ if [ "$HAS_ZSH" -eq 1 ]; then
 fi
 
 # ── chezmoi apply (dotfiles only — skip heavy package scripts) ──────────────
+# Clone transport. A forwarded agent that GitHub accepts → ssh. Otherwise https;
+# if git lacks its https helper (OpenWrt splits it into git-http), chezmoi's
+# builtin go-git clones https with no helper at all.
+_SSH_INIT=""
+if [ -n "${SSH_AUTH_SOCK:-}" ] && command -v ssh >/dev/null 2>&1; then
+  mkdir -p "$HOME/.ssh"
+  case "$(readlink "$(command -v ssh)" 2>/dev/null)" in
+    # dropbear dbclient: -y accepts GitHub's host key on first connect
+    *dropbear*|*dbclient*) GIT_SSH_COMMAND="ssh -y" ;;
+    *) GIT_SSH_COMMAND="ssh -o StrictHostKeyChecking=accept-new -o BatchMode=yes" ;;
+  esac
+  # simple: git won't add `-o SendEnv=GIT_PROTOCOL`, which dbclient rejects
+  export GIT_SSH_COMMAND GIT_SSH_VARIANT=simple
+  _to=""; command -v timeout >/dev/null 2>&1 && _to="timeout 15"
+  if $_to $GIT_SSH_COMMAND -T git@github.com </dev/null 2>&1 | grep -q "successfully authenticated"; then
+    _SSH_INIT="--ssh"
+    echo "[ing] forwarded ssh agent accepted by GitHub — cloning over ssh"
+  else
+    unset GIT_SSH_COMMAND GIT_SSH_VARIANT
+  fi
+fi
+_BUILTIN_GIT=""
+if [ -z "$_SSH_INIT" ] && [ ! -x "$(git --exec-path)/git-remote-https" ]; then
+  _BUILTIN_GIT="useBuiltinGit: true"
+  echo "[ing] git has no https helper — using chezmoi builtin git"
+fi
+
 CHEZMOI_DATA="$HOME/.config/chezmoi/chezmoi.yaml"
 mkdir -p "$(dirname "$CHEZMOI_DATA")"
 cat > "$CHEZMOI_DATA" <<EOF
+${_BUILTIN_GIT}
 data:
   profile: ${PROFILE}
 EOF
 
 _DOTFILES_CHANGED=0
 if [ -d "$HOME/.local/share/chezmoi/.git" ]; then
-  _cm_out="$(chezmoi update --exclude=scripts 2>&1)" || true
-  [ -z "$_cm_out" ] || _DOTFILES_CHANGED=1
+  if _cm_out="$(chezmoi update --exclude=scripts 2>&1)"; then
+    [ -z "$_cm_out" ] || _DOTFILES_CHANGED=1
+  else
+    echo "[ing] WARNING: chezmoi update failed (ssh remote without agent?): $_cm_out"
+  fi
 else
-  chezmoi init "$GITHUB_USERNAME"
+  # shellcheck disable=SC2086  # _SSH_INIT is empty or a single flag
+  chezmoi init $_SSH_INIT "$GITHUB_USERNAME"
   chezmoi apply --exclude=scripts
   _DOTFILES_CHANGED=1
 fi
