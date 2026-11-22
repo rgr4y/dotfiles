@@ -1,0 +1,13 @@
+# Default gitleaks rules + repo-specific path allowlist.
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "IDE state: gitignored, never committed (IntelliJ tool-window IDs trip generic-api-key)"
+paths = ['''(^|/)\.idea/''']
+
+[[allowlists]]
+description = "claude-tail help text ('Keys:  c=Conversation ...') in old history"
+condition = "AND"
+commits = ["fe9f55a204675e18612a97aff69709917f24e591"]
+paths = ['''^dot_local/bin/executable_claude-tail$''']

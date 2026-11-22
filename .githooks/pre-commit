@@ -1,0 +1,8 @@
+#!/bin/sh
+# Public repo: block commits that stage secrets. Enable with `make hooks`.
+if ! command -v gitleaks >/dev/null 2>&1; then
+  echo "[pre-commit] gitleaks not installed — refusing to commit to a public repo." >&2
+  echo "[pre-commit] brew install gitleaks (or bypass once: git commit --no-verify)" >&2
+  exit 1
+fi
+exec gitleaks git --pre-commit --staged --redact --no-banner -v

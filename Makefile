@@ -13,3 +13,7 @@ deploy:
 	cd $(SITE) && git add $(addprefix public/,$(SCRIPTS)) && \
 	git commit -qm "$${changed# }" && echo "[deploy] committed:$$changed" && \
 	git push -q && echo "[deploy] pushed lolf.art"
+
+.PHONY: hooks
+hooks:
+	@git config core.hooksPath .githooks && echo "[hooks] core.hooksPath -> .githooks (gitleaks pre-commit)"

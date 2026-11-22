@@ -94,3 +94,8 @@ README.md
 .auto_sudo
 .auto_sudo.zsh
 {{ end }}
+
+# repo-only files (not dotfiles for $HOME)
+Makefile
+AGENTS.md
+PROGRESS.md
